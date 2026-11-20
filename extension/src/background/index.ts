@@ -1,5 +1,5 @@
 /** background 入口 — 消息路由 / 词表定时更新 */
-import { ensureGlossary, glossaryMeta, updateGlossary, UpdateResult } from './glossary';
+import { ensureGlossary, glossaryMeta, updateGlossary, updateLangTerms, UpdateResult } from './glossary';
 import { translateBlocks, aiTest, cacheStats, cacheClear } from './translate';
 import { getSettings } from './settings';
 import { api } from '../shared/api';
@@ -26,6 +26,11 @@ api.alarms.onAlarm.addListener(alarm => {
   if (alarm.name !== 'glossaryCheck') return;
   updateGlossary(false).then(r => {
     if (r.updated) console.log('glossary auto-updated, count=', r.count);
+  });
+  // 语言文件层：GitHub Actions 每日重建产物，这里按 sha 增量拉取（失败静默降级）
+  updateLangTerms(false).then(r => {
+    if (r.updated) console.log('lang terms auto-updated, count=', r.count);
+    else if (r.error) console.warn('lang terms update failed:', r.error);
   });
 });
 
@@ -71,8 +76,9 @@ api.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
         break;
       }
       case 'glossaryUpdate': {
-        const r: UpdateResult = await updateGlossary(msg.force ?? true);
-        sendResponse(r);
+        const [r, lang] = await Promise.all([updateGlossary(msg.force ?? true), updateLangTerms(msg.force ?? true)]);
+        const res: UpdateResult & { lang?: { updated: boolean; count: number; error?: string } } = { ...r, lang };
+        sendResponse(res);
         break;
       }
       case 'aiTest': {

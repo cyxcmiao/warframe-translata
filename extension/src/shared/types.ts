@@ -19,6 +19,9 @@ export interface GlossaryMeta {
   retainedCount: number;
   builtAt: string;
   lastCheck: string | null;
+  /** 游戏语言文件挖掘层的条目数与上次拉取时间（运行时自动更新） */
+  langCount: number;
+  langLastCheck: string | null;
 }
 
 /** 词表匹配结果（位置基于传入文本） */

@@ -151,8 +151,11 @@ $('perm').addEventListener('click', async () => {
 async function refreshGlossStatus(): Promise<void> {
   const meta = (await api.runtime.sendMessage({ type: 'glossaryStatus' })) as GlossaryMeta;
   const last = meta.lastCheck ? new Date(meta.lastCheck).toLocaleString() : '从未';
+  const langLast = meta.langLastCheck ? new Date(meta.langLastCheck).toLocaleString() : '从未';
   const kept = meta.retainedCount ? ` · ${meta.retainedCount} 条保留英文名` : '';
-  $('glossStatus').textContent = `版本 ${meta.version} · ${meta.count} 条译名（官方词表 + 内置机制表）${kept} · 上次检查: ${last}`;
+  $('glossStatus').textContent =
+    `版本 ${meta.version} · ${meta.count} 条译名（官方词表 + 内置机制表）${kept} · 上次检查: ${last}；` +
+    `语言层 ${meta.langCount} 条 · 上次拉取: ${langLast}`;
 }
 
 const fmtNum = (n: number): string =>
@@ -204,12 +207,21 @@ $('glossUpdate').addEventListener('click', async () => {
     updated: boolean;
     count: number;
     error?: string;
+    lang?: { updated: boolean; count: number; error?: string };
   };
+  const langNote = r.lang
+    ? r.lang.error
+      ? `；语言层失败: ${r.lang.error}`
+      : r.lang.updated
+        ? `；语言层已更新 ${r.lang.count} 条`
+        : `；语言层已是最新（${r.lang.count} 条）`
+    : '';
   if (r.error) {
-    $('glossResult').textContent = `失败: ${r.error}`;
+    $('glossResult').textContent = `失败: ${r.error}${langNote}`;
     $('glossResult').style.color = '#c0392b';
   } else {
-    $('glossResult').textContent = r.updated ? `已更新，当前 ${r.count} 条` : `已是最新（${r.count} 条）`;
+    $('glossResult').textContent =
+      (r.updated ? `已更新，当前 ${r.count} 条` : `已是最新（${r.count} 条）`) + langNote;
     $('glossResult').style.color = '#2a9d5c';
   }
   void refreshGlossStatus();

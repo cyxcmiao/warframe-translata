@@ -12,7 +12,7 @@
 2. **AI 增强翻译**（OpenAI 兼容自填接口，未配置 Key 时不翻译并在页面弹提示）：词表 Trie 匹配（最长优先 + 复数 `Primes`/所有格 `Saryn's`/大小写/跨空白）先行，**只把当前块命中的术语**注入 prompt（词表译名最高优先级）；译后校验强制回填漏译术语、校验链接占位符完整性；AI 原样回显视为假译文不落缓存；请求失败按类型提示（Key 无效 / 限流 / 超时 / 网络），失败块保留原文（不落缓存），页面顶部弹自动消散的提醒。
    - 省 token：词典已给出终局译文的块（纯链接文本、官方保留英文名、官方中文名里自带的英文如"猛虎 Prime"、纯数字/单位单元格 `36 m`、占位词 `None`/`N/A`）**不发 AI**，直接采用词典结果；请求带 `max_tokens` 兜底，输出被截断时丢弃末尾行。
    - **视口懒翻译**：只立即翻译首屏附近的块，视口外挂起，滚动接近时由 IntersectionObserver 放行——不翻用户没读到的部分，首屏出译文更快。
-3. **持久化 + 增量更新**：词表存 IndexedDB，扩展内置快照兜底；后台每 24h 只拉官方索引（~500B×2 压缩），hash 变了才下载对应文件重建；缓存 key = 提示词版本+词表版本+模式，改 prompt 时 bump `PROMPT_VERSION` 让旧缓存自然失效；设置页可查看缓存容量并一键清空；AI 用量（接口响应自带 usage）按月累计，设置页展示。
+3. **持久化 + 增量更新**：词表存 IndexedDB，扩展内置快照兜底；后台每 24h 只拉官方索引（~500B×2 压缩），hash 变了才下载对应文件重建；**语言层词条**由 GitHub Actions 每日从游戏语言文件重建并提交到托管仓库（[cyxcmiao/warframe-translata](https://github.com/cyxcmiao/warframe-translata)），后台同一检查周期按内容 sha 增量拉取（raw → jsDelivr 双源回退，失败静默降级到当前层）；缓存 key = 提示词版本+词表版本+模式，改 prompt 时 bump `PROMPT_VERSION` 让旧缓存自然失效；设置页可查看缓存容量并一键清空；AI 用量（接口响应自带 usage）按月累计，设置页展示。
 4. **呈现**：段落/标题译文插在原文正下方，表格单元格/信息框内追加译文；行内链接在译文中还原（链接文字也翻译）；长段落逐句对应。
 
 ## 目录
@@ -40,7 +40,7 @@ extension/src/           # 扩展源码（shared/background/content/options/popu
 
 ```bash
 npm install
-npm run build:data   # 重新生成词表（tools/cache/export 有缓存，增量下载）
+npm run build:data   # 重新生成词表（官方导出 + 语言文件层；tools/cache 有缓存，增量下载）
 npm run build        # 构建扩展（esbuild 不做类型检查，改完源码先跑 typecheck）
 npm run typecheck    # TypeScript 类型检查（extension/src 全量）
 npm test             # 匹配器单元测试

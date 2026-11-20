@@ -12,6 +12,12 @@ export const DEFAULT_SETTINGS: Settings = {
   glossaryCheckHours: 24,
 };
 
+/**
+ * 语言文件层词条的托管仓库（GitHub Actions 每日重建 data/lang_terms.json 并提交，
+ * 扩展后台按文件内容 sha 增量拉取）。仓库必须为 public（raw/jsDelivr 匿名拉取依赖）。
+ */
+export const LANG_TERMS_REPO = 'cyxcmiao/warframe-translata';
+
 export const STORAGE_KEYS = {
   settings: 'settings',
   siteEnabled: 'siteEnabled', // { [origin]: boolean }

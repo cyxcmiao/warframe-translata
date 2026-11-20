@@ -1,0 +1,42 @@
+# 每日从游戏语言文件重建补充词表（data/lang_terms.json），变更则自动提交。
+# 扩展后台按 commit 增量拉取该文件（见 glossary.ts updateLangTerms）。
+# 无需 npm install：build_lang_terms.js 只用 Node 标准库。
+name: update-lang-terms
+
+on:
+  schedule:
+    - cron: '17 21 * * *' # UTC 21:17 ≈ 北京 05:17，避开 DE 更新高峰
+  workflow_dispatch: {} # 手动触发（设置页"检查词表更新"调试用）
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-lang-terms
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: rebuild lang_terms from game language files
+        run: node tools/build_lang_terms.js
+
+      - name: commit if changed
+        run: |
+          if [ -n "$(git status --porcelain data/lang_terms.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add data/lang_terms.json
+            git commit -m "chore(lang-terms): refresh from game files ($(date -u +%F))"
+            git push
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "lang_terms.json unchanged, skip commit"
+          fi

@@ -8,8 +8,9 @@
  */
 import { idbOpen, idbGet, idbPut } from '../shared/idb';
 import { TermMatcher } from '../shared/matcher';
+import { LANG_TERMS_REPO } from '../shared/const';
 import type { GlossaryMeta, TermEntry } from '../shared/types';
-import { todayStr } from '../shared/util';
+import { todayStr, sha256hex } from '../shared/util';
 import { EXPORT_BASES, fetchIndex, fetchExport, rebuildTerms } from './exporter';
 
 const DB_NAME = 'tw';
@@ -36,8 +37,26 @@ let mechTerms: Record<string, string> = {};
 let mechLoaded = false;
 /** 游戏语言文件挖掘层（tools/build_lang_terms.js 产出，官方导出缺的 UI 复合词） */
 let langTerms: Record<string, string> = {};
+let langSha = ''; // 当前生效词条文件的 sha256（bundled 或远程拉取），增量比对基准
+let langLastCheck: string | null = null;
 let langLoaded = false;
 let updating: Promise<UpdateResult> | null = null;
+
+/** 远程语言层词条记录（IDB store 'glossary' key 'langTerms'），存在则优先于内置快照 */
+interface LangTermsRecord {
+  terms: Record<string, string>;
+  sha: string;
+  version: string;
+  fetchedAt: string;
+}
+
+export interface LangUpdateResult {
+  updated: boolean;
+  count: number;
+  error?: string;
+  /** 仓库常量未配置时跳过远程检查 */
+  skipped?: boolean;
+}
 
 function getDb(): Promise<IDBDatabase> {
   if (db) return Promise.resolve(db);
@@ -75,14 +94,76 @@ async function loadMechanisms(): Promise<Record<string, string>> {
 }
 
 /** 游戏语言文件挖掘层（data/lang_terms.json，build_lang_terms.js 产出），读取失败不阻塞词表 */
-async function loadLangTerms(): Promise<Record<string, string>> {
+async function loadBundledLangTerms(): Promise<{ terms: Record<string, string>; sha: string }> {
   try {
     const url = chrome.runtime.getURL('data/lang_terms.json');
-    const parsed = JSON.parse(await (await fetch(url)).text()) as { terms?: Record<string, string> };
-    return parsed.terms ?? {};
+    const text = await (await fetch(url)).text();
+    const parsed = JSON.parse(text) as { terms?: Record<string, string> };
+    return { terms: parsed.terms ?? {}, sha: await sha256hex(text) };
   } catch {
-    return {};
+    return { terms: {}, sha: '' };
   }
+}
+
+/**
+ * 远程拉取语言层词条（GitHub Actions 每日重建 data/lang_terms.json）。
+ * 按文件内容 sha 增量：不变只记检查时间，变了写入 IDB 并热重建匹配器。
+ * 失败静默降级到当前生效层（内置快照或上次拉取），不阻塞翻译。
+ */
+export async function updateLangTerms(force = false): Promise<LangUpdateResult> {
+  await ensureGlossary(); // 保证 langTerms/官方 record 就绪，供热重建
+  const curCount = Object.keys(langTerms).length;
+  if (!LANG_TERMS_REPO || /YOUR_GH_USER/i.test(LANG_TERMS_REPO)) {
+    return { updated: false, count: curCount, skipped: true };
+  }
+  const urls = [
+    `https://raw.githubusercontent.com/${LANG_TERMS_REPO}/main/data/lang_terms.json`,
+    `https://cdn.jsdelivr.net/gh/${LANG_TERMS_REPO}@main/data/lang_terms.json`,
+  ];
+  let text: string | null = null;
+  let lastErr: unknown = null;
+  for (const u of urls) {
+    try {
+      const res = await fetch(u, { signal: AbortSignal.timeout(30000), cache: 'no-store' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      text = await res.text();
+      break;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  if (text === null) {
+    return { updated: false, count: curCount, error: String(lastErr) };
+  }
+  const sha = await sha256hex(text);
+  // 增量：与当前生效内容一致（含尚未入库的内置快照）→ 只记检查时间
+  if (!force && sha === langSha) {
+    langLastCheck = new Date().toISOString();
+    return { updated: false, count: curCount };
+  }
+  let parsed: { terms?: Record<string, string>; version?: string };
+  try {
+    parsed = JSON.parse(text) as { terms?: Record<string, string>; version?: string };
+  } catch (e) {
+    return { updated: false, count: curCount, error: `JSON 解析失败: ${String(e)}` };
+  }
+  const terms = parsed.terms ?? {};
+  if (Object.keys(terms).length < 1000) {
+    return { updated: false, count: curCount, error: `词条数异常（${Object.keys(terms).length}），放弃更新` };
+  }
+  const rec: LangTermsRecord = {
+    terms,
+    sha,
+    version: parsed.version || todayStr(),
+    fetchedAt: new Date().toISOString(),
+  };
+  const d = await getDb();
+  await idbPut(d, 'glossary', rec, 'langTerms');
+  langTerms = rec.terms;
+  langSha = rec.sha;
+  langLastCheck = rec.fetchedAt;
+  if (record) installRecord(record); // 热重建匹配器（官方层不变，只换补充层）
+  return { updated: true, count: Object.keys(terms).length };
 }
 
 /**
@@ -113,7 +194,24 @@ export async function ensureGlossary(): Promise<void> {
     mechLoaded = true;
   }
   if (!langLoaded) {
-    langTerms = await loadLangTerms();
+    // 远程拉取过的记录优先，无记录则用扩展内置快照（sha 作为后续增量比对基准）
+    let rec: LangTermsRecord | null = null;
+    try {
+      const d = await getDb();
+      rec = (await idbGet<LangTermsRecord>(d, 'glossary', 'langTerms')) ?? null;
+    } catch {
+      /* IDB 不可用则直接用内置快照 */
+    }
+    if (rec && rec.terms && Object.keys(rec.terms).length) {
+      langTerms = rec.terms;
+      langSha = rec.sha;
+      langLastCheck = rec.fetchedAt;
+    } else {
+      const bundled = await loadBundledLangTerms();
+      langTerms = bundled.terms;
+      langSha = bundled.sha;
+      langLastCheck = null;
+    }
     langLoaded = true;
   }
   if (record) return;
@@ -155,13 +253,17 @@ export function getRetainedMatcher(): TermMatcher {
 }
 
 export function glossaryMeta(): GlossaryMeta {
-  if (!record) return { version: '', count: 0, retainedCount: 0, builtAt: '', lastCheck: null };
+  if (!record) {
+    return { version: '', count: 0, retainedCount: 0, builtAt: '', lastCheck: null, langCount: 0, langLastCheck: null };
+  }
   return {
     version: record.version,
     count: entryList.length,
     retainedCount: record.retained?.length ?? 0,
     builtAt: record.builtAt,
     lastCheck: record.lastCheck,
+    langCount: Object.keys(langTerms).length,
+    langLastCheck,
   };
 }
 
