@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h1>Warframe Wiki 精准翻译</h1>
+  <div id="siteRow">
+    <label><input type="checkbox" id="siteEnabled"> 本站启用</label>
+    <span id="modeBadge"></span>
+  </div>
+  <div class="btns">
+    <button id="translateNow">翻译此页</button>
+    <button id="restore" class="secondary">还原原文</button>
+  </div>
+  <p class="hint" id="scHint"></p>
+  <p id="gloss" class="hint">…</p>
+  <div class="btns">
+    <button id="glossUpdate" class="secondary">检查词表更新</button>
+    <button id="openOptions" class="secondary">设置</button>
+  </div>
+  <p id="msg" class="hint"></p>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Warframe Wiki 精准翻译 · 设置</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <h1>Warframe Wiki 精准翻译</h1>
+
+  <section>
+    <h2>AI 翻译（OpenAI 兼容接口）</h2>
+    <p class="hint">翻译基于 AI 整句增强（术语 100% 锁定官方译名）。未填写 API Key 时不会翻译，页面保留英文原文；接口连接失败时页面顶部会弹提示。</p>
+    <label class="row">接口地址 Base URL
+      <input type="text" id="aiBaseUrl" placeholder="https://api.deepseek.com/v1" spellcheck="false">
+    </label>
+    <label class="row">API Key
+      <input type="password" id="aiKey" placeholder="sk-..." spellcheck="false">
+    </label>
+    <label class="row">模型
+      <input type="text" id="aiModel" placeholder="deepseek-chat" spellcheck="false">
+    </label>
+    <p class="hint">常用: DeepSeek · https://api.deepseek.com/v1 · deepseek-chat；智谱 · https://open.bigmodel.cn/api/paas/v4 · glm-4.7-flash。Key 仅保存在本机（chrome.storage.local），不上传不同步。</p>
+    <p class="hint">首次使用新接口需要授权扩展访问该域名（浏览器会弹出授权提示，或点下方按钮手动授权）。</p>
+    <div class="row">
+      <button id="save">保存设置</button>
+      <button id="perm" class="secondary">授权接口域名</button>
+      <button id="test" class="secondary">测试连接</button>
+      <span id="aiResult" class="result"></span>
+    </div>
+  </section>
+
+  <section>
+    <h2>显示</h2>
+    <label class="row">
+      <input type="checkbox" id="autoTranslate">
+      打开 wiki 页面时自动翻译
+    </label>
+    <label class="row">
+      <input type="checkbox" id="translateComments">
+      翻译页面下方的用户评论
+    </label>
+    <label class="row">译文字号 <input type="number" id="fontSize" min="11" max="20" step="1"></label>
+    <label class="row">译文颜色 <input type="color" id="color"></label>
+    <p class="hint">设置修改后自动保存并立即生效，已打开的 wiki 页会实时更新字号/颜色。</p>
+  </section>
+
+  <section>
+    <h2>快捷键</h2>
+    <label class="row">切换译文 显示/隐藏
+      <input type="text" id="toggleShortcut" class="shortcut" readonly placeholder="点击后按下组合键" spellcheck="false">
+      <button id="shortcutClear" class="secondary">禁用</button>
+      <span id="shortcutResult" class="result"></span>
+    </label>
+    <p class="hint">点击输入框后直接按下想要的组合键即可修改，Esc 取消、Backspace 清除（禁用）。需包含 Ctrl/Alt/Shift 修饰键，F1~F12 可单独使用；浏览器占用的组合（如 Ctrl+T）无法捕获。快捷键在 wiki 页面上生效。</p>
+  </section>
+
+  <section>
+    <h2>用量与缓存</h2>
+    <p id="usageStatus" class="hint">加载中…</p>
+    <p id="cacheStatus" class="hint">…</p>
+    <div class="row">
+      <button id="cacheClear" class="secondary">清空翻译缓存</button>
+      <span id="cacheResult" class="result"></span>
+    </div>
+    <p class="hint">翻译结果缓存在本机（IndexedDB），相同文本不重复请求 AI；清空后相关文本会重新翻译。用量数据来自 AI 接口响应自带的统计，仅保存在本机。</p>
+  </section>
+
+  <section>
+    <h2>官方词表</h2>
+    <p id="glossStatus" class="hint">加载中…</p>
+    <p class="hint">词表来自 Warframe 官方简中数据导出（游戏内文本）。扩展每 24 小时自动检查一次官方索引（约 1KB），数据有更新才下载重建；也可以手动检查。官方未提供中文译名的名称（如 Excalibur）会保留英文。</p>
+    <div class="row">
+      <button id="glossUpdate" class="secondary">立即检查更新</button>
+      <span id="glossResult" class="result"></span>
+    </div>
+  </section>
+
+  <footer>translataWiki v<span id="ver"></span> · 术语 100% 采用官方译名，表外专有名词保留英文</footer>
+  <script src="options.js"></script>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "name": "translatawiki",
+  "version": "0.1.0",
+  "private": true,
+  "type": "commonjs",
+  "description": "Warframe 英文 Wiki 精准翻译扩展：官方词表锁术语 + AI 句子翻译",
+  "scripts": {
+    "build": "node tools/build_ext.js",
+    "build:data": "node tools/build_de_map.js && node tools/build_lang_terms.js",
+    "typecheck": "tsc -p extension/src/test/tsconfig.json",
+    "test": "node tools/test_matcher.js"
+  },
+  "dependencies": {
+    "lzma": "^2.3.2",
+    "lzma-wasm": "^1.0.7"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.7",
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
+    "playwright-core": "^1.65.1",
+    "typescript": "^7.0.2",
+    "web-ext": "^10.8.0"
+  },
+  "allowScripts": {
+    "geckodriver@8.0.0": true
+  }
+}

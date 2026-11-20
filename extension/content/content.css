@@ -1,0 +1,32 @@
+/* 沉浸式双语译文样式 —— 变量由 content script 写入 :root */
+
+.tw-tr {
+  --c: var(--tw-tr-color, #4a90d9);
+  color: var(--c);
+  font-size: var(--tw-tr-font-size, 14px);
+  line-height: 1.6;
+  margin: 3px 0 10px 2px;
+  padding-left: 10px;
+  border-left: 3px solid var(--c);
+  white-space: pre-line;
+  text-align: left;
+}
+
+.tw-tr a {
+  color: var(--c);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* 表格单元格/信息框内：更紧凑 */
+.tw-tr.tw-tr-cell {
+  margin: 3px 0 2px 2px;
+  padding-left: 6px;
+  border-left-width: 2px;
+  font-size: calc(var(--tw-tr-font-size, 14px) - 1px);
+}
+
+/* 标题下的译文 */
+h1.tw-host + .tw-tr, h2 + .tw-tr, h3 + .tw-tr, h4 + .tw-tr, h5 + .tw-tr {
+  margin-top: 0;
+}

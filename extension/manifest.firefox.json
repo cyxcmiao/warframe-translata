@@ -1,0 +1,44 @@
+{
+  "manifest_version": 3,
+  "name": "Warframe Wiki 精准翻译",
+  "description": "用游戏官方词表锁定术语，AI 整句增强翻译 WARFRAME 英文 Wiki，双语对照展示。",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "translatawiki@warframe-helper.dev",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": ["websiteContent"]
+      }
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "permissions": ["storage", "unlimitedStorage", "alarms"],
+  "optional_host_permissions": ["https://*/*"],
+  "host_permissions": [
+    "https://content.warframe.com/*",
+    "https://origin.warframe.com/*"
+  ],
+  "background": {
+    "scripts": ["background/background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://wiki.warframe.com/*"
+      ],
+      "js": ["content/content.js"],
+      "css": ["content/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Warframe Wiki 精准翻译"
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  }
+}
