@@ -40,6 +40,9 @@ let langTerms: Record<string, string> = {};
 let langSha = ''; // 当前生效词条文件的 sha256（bundled 或远程拉取），增量比对基准
 let langLastCheck: string | null = null;
 let langLoaded = false;
+/** 人工覆盖层（data/manual_overrides.json）：优先级最高，修正官方/语言层译名或锁定英文（zh===en） */
+let manualOverrides: Record<string, string> = {};
+let overridesLoaded = false;
 let updating: Promise<UpdateResult> | null = null;
 
 /** 远程语言层词条记录（IDB store 'glossary' key 'langTerms'），存在则优先于内置快照 */
@@ -87,6 +90,16 @@ async function loadSnapshot(): Promise<Snapshot> {
 async function loadMechanisms(): Promise<Record<string, string>> {
   try {
     const url = chrome.runtime.getURL('data/mechanism_terms.json');
+    return JSON.parse(await (await fetch(url)).text()) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+/** 人工覆盖层（data/manual_overrides.json），读取失败不阻塞词表 */
+async function loadManualOverrides(): Promise<Record<string, string>> {
+  try {
+    const url = chrome.runtime.getURL('data/manual_overrides.json');
     return JSON.parse(await (await fetch(url)).text()) as Record<string, string>;
   } catch {
     return {};
@@ -167,9 +180,11 @@ export async function updateLangTerms(force = false): Promise<LangUpdateResult> 
 }
 
 /**
- * 合并补充术语层（优先级从低到高：机制表 < 语言文件层 < 官方词表）：
+ * 合并术语层（优先级从低到高：机制表 < 语言文件层 < 官方词表 < 人工覆盖层）：
  *  - 官方已有译名的条目以官方为准（后展开覆盖）；
- *  - 官方保留英文名（retained，如 Excalibur）即使各补充层里有也删掉，照抄英文才是正确译法。
+ *  - 官方保留英文名（retained，如 Excalibur）即使各补充层里有也删掉，照抄英文才是正确译法；
+ *  - 人工覆盖层最后展开：明确的人工意图可覆盖包括官方与 retained 锁定在内的一切
+ *    （修正官方过时/错误译名，或 zh===en 强制保留英文）。
  */
 function mergeGlossaryLayers(official: Record<string, string>, retained: string[]): Record<string, string> {
   const out = { ...mechTerms, ...langTerms };
@@ -177,7 +192,7 @@ function mergeGlossaryLayers(official: Record<string, string>, retained: string[
   for (const en of Object.keys(out)) {
     if (retainedSet.has(en.toLowerCase())) delete out[en];
   }
-  return { ...out, ...official };
+  return { ...out, ...official, ...manualOverrides };
 }
 
 function installRecord(rec: GlossaryRecord): void {
@@ -192,6 +207,10 @@ export async function ensureGlossary(): Promise<void> {
   if (!mechLoaded) {
     mechTerms = await loadMechanisms();
     mechLoaded = true;
+  }
+  if (!overridesLoaded) {
+    manualOverrides = await loadManualOverrides();
+    overridesLoaded = true;
   }
   if (!langLoaded) {
     // 远程拉取过的记录优先，无记录则用扩展内置快照（sha 作为后续增量比对基准）

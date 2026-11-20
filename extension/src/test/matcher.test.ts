@@ -16,7 +16,8 @@ function check(name: string, cond: boolean, detail?: unknown) {
 const data = JSON.parse(fs.readFileSync(path.join(__dirname, '../../data/de_names.json'), 'utf8'));
 const mech = JSON.parse(fs.readFileSync(path.join(__dirname, '../../data/mechanism_terms.json'), 'utf8')) as Record<string, string>;
 const lang = JSON.parse(fs.readFileSync(path.join(__dirname, '../../data/lang_terms.json'), 'utf8')) as { terms: Record<string, string> };
-// 与运行时 glossary.installRecord 一致：机制表 < 语言文件层 < 官方（retained 排除）
+const overrides = JSON.parse(fs.readFileSync(path.join(__dirname, '../../data/manual_overrides.json'), 'utf8')) as Record<string, string>;
+// 与运行时 glossary.installRecord 一致：机制表 < 语言文件层 < 官方 < 人工覆盖（retained 排除，覆盖层除外）
 const retained = new Set(((data.retained ?? []) as string[]).map(s => s.toLowerCase()));
 const merged: Record<string, string> = {};
 for (const [en, zh] of Object.entries(mech)) {
@@ -26,8 +27,9 @@ for (const [en, zh] of Object.entries(lang.terms)) {
   if (!retained.has(en.toLowerCase())) merged[en] = zh;
 }
 for (const [en, zh] of Object.entries(data.terms as Record<string, string>)) merged[en] = zh;
+for (const [en, zh] of Object.entries(overrides)) merged[en] = zh;
 const entries: TermEntry[] = Object.entries(merged).map(([en, zh]) => ({ en, zh }));
-console.log(`glossary: ${entries.length} terms (official v${data.version} + mech ${Object.keys(mech).length} + lang ${Object.keys(lang.terms).length})`);
+console.log(`glossary: ${entries.length} terms (official v${data.version} + mech ${Object.keys(mech).length} + lang ${Object.keys(lang.terms).length} + overrides ${Object.keys(overrides).length})`);
 const m = new TermMatcher(entries);
 
 // --- 基础命中

@@ -51,6 +51,24 @@ node tools/test_options.js
 
 浏览器测试需要 Playwright Chromium（`npx playwright-core install chromium`；本机 Chrome/Edge ≥137 已移除 `--load-extension` 支持）。fandom.com 在部分网络不通，测试用官方镜像 `wiki.warframe.com`（URL 短格式为 `/w/词条名`）。
 
+## 术语维护
+
+**自动层不用管**：官方词表、语言文件层都自动更新。手动维护只涉及两个文件：
+
+1. **修正已有译名 / 强制保留英文** → `data/manual_overrides.json`（人工覆盖层，优先级最高，可覆盖官方与 retained 锁定）：
+   ```json
+   { "Flechette Orb": "飞掷丸", "Excalibur Umbra": "Excalibur Umbra" }
+   ```
+2. **新增 wiki 用语** → `data/mechanism_terms.json`（机制术语表；`zh===en` = 锁定保留英文）
+
+改完必做：
+
+- `const.ts` 里 **bump `PROMPT_VERSION`**——翻译缓存 key 含此版本，不 bump 的话已缓存页面永远显示旧译文；
+- `npm run build` 重构建 + 重载扩展；
+- 提交推送到托管仓库（其他用户通过扩展更新拿到，语言层则由 Actions 自动流转，无需发版）。
+
+注意：**不要直接改 `data/lang_terms.json`**（Actions 每日重建会覆盖回去）；语言文件源头译名有误时走 manual_overrides 修正。
+
 ## 安装使用
 
 1. Chrome: 加载 `dist/chrome`（chrome://extensions → 开发者模式 → 加载已解压）；Firefox: `dist/firefox`（about:debugging → 临时载入）。

@@ -31,6 +31,7 @@ const staticFiles = [
   [path.join(ROOT, 'data/de_names.json'), 'data/de_names.json'],
   [path.join(ROOT, 'data/mechanism_terms.json'), 'data/mechanism_terms.json'],
   [path.join(ROOT, 'data/lang_terms.json'), 'data/lang_terms.json'],
+  [path.join(ROOT, 'data/manual_overrides.json'), 'data/manual_overrides.json'],
 ];
 
 function copy(from, to) {
