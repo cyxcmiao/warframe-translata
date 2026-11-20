@@ -130,14 +130,18 @@ export async function updateLangTerms(force = false): Promise<LangUpdateResult> 
     return { updated: false, count: curCount, skipped: true };
   }
   const urls = [
+    // 多 CDN 镜像：raw 被墙时走 jsDelivr 系（多入口互备）与 statically，全部失败才降级
     `https://raw.githubusercontent.com/${LANG_TERMS_REPO}/main/data/lang_terms.json`,
     `https://cdn.jsdelivr.net/gh/${LANG_TERMS_REPO}@main/data/lang_terms.json`,
+    `https://fastly.jsdelivr.net/gh/${LANG_TERMS_REPO}@main/data/lang_terms.json`,
+    `https://gcore.jsdelivr.net/gh/${LANG_TERMS_REPO}@main/data/lang_terms.json`,
+    `https://cdn.statically.io/gh/${LANG_TERMS_REPO}/main/data/lang_terms.json`,
   ];
   let text: string | null = null;
   let lastErr: unknown = null;
   for (const u of urls) {
     try {
-      const res = await fetch(u, { signal: AbortSignal.timeout(30000), cache: 'no-store' });
+      const res = await fetch(u, { signal: AbortSignal.timeout(15000), cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       text = await res.text();
       break;
