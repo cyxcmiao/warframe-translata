@@ -33,6 +33,19 @@ async function init(): Promise<void> {
   if (meta) {
     const last = meta.lastCheck ? new Date(meta.lastCheck).toLocaleString() : '从未';
     $('gloss').textContent = `词表 v${meta.version} · ${meta.count} 条 · 上次检查 ${last}`;
+    // 语言层陈旧警示（GitHub 不可达等）：>7 天未成功拉取时提示，翻译不受影响
+    const warn = $('langWarn') as HTMLParagraphElement;
+    const days = meta.langLastCheck
+      ? Math.floor((Date.now() - new Date(meta.langLastCheck).getTime()) / 86400000)
+      : null;
+    if (days === null || days >= 7) {
+      warn.textContent =
+        days === null
+          ? '语言层词条尚未联网拉取（刚安装或网络受限），当前使用内置词条，翻译不受影响'
+          : `语言层词条已 ${days} 天未更新（GitHub 不可达？），翻译仍使用内置词条`;
+      warn.style.color = '#e67e22';
+      warn.style.display = 'block';
+    }
   }
 }
 
