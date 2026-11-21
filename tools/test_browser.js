@@ -61,7 +61,6 @@ const URL_TO_TEST = process.argv[2] || 'https://warframe.fandom.com/wiki/Tigris_
         ai: trs.filter(e => e.dataset.twMode === 'ai').length,
         dict: trs.filter(e => e.dataset.twMode === 'dict').length,
       },
-      fabText: document.querySelector('#tw-fab-host') ? 'fab-present' : 'fab-missing',
     };
   });
   console.log('RESULT:', JSON.stringify(result, null, 2));

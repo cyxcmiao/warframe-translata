@@ -10,6 +10,7 @@ export interface Settings {
   color: string; // 译文主色
   toggleShortcut: string; // 切换 译文/隐藏 的快捷键（"Ctrl+Alt+D"，空串 = 禁用）
   glossaryCheckHours: number; // 词表更新检查间隔
+  zhSearch: boolean; // 搜索框支持中文术语：输入官方中文译名拉候选，提交时改写为英文（纯词表反向查询，不依赖 AI）
   /** 仅存在于派生副本（发给 content script 的 settings）：真实 key 是否已配置。
    *  storage 与 options 页持有的 aiKey 不进此字段——content 上下文只拿布尔位，不持明文。 */
   hasKey?: boolean;
@@ -42,6 +43,20 @@ export interface TermEntry {
   zh: string;
 }
 
+/** 搜索框中文候选（词表反向查询，zh→en） */
+export interface ZhSuggestItem {
+  en: string;
+  zh: string;
+  /** 输入与词条 zh 完全相等（区别于前缀扩展出的候选） */
+  exact: boolean;
+}
+
+/** 查询串里被改写掉的中文片段 */
+export interface ZhResolveHit {
+  zh: string;
+  en: string;
+}
+
 export interface BlockIn {
   id: string;
   text: string;
@@ -55,6 +70,8 @@ export interface BlockOut {
   translation?: string;
   viaAI?: boolean;
   error?: string;
+  /** AI 失败/校验不过的回退块（translation = 原文）：不渲染误导性"原文+译名链接"，待补翻重试 */
+  failed?: boolean;
 }
 
 /** content ↔ background 消息 */
@@ -65,9 +82,10 @@ export type Msg =
   | { type: 'glossaryUpdate'; force?: boolean }
   | { type: 'aiTest' }
   | { type: 'settingsChanged' }
-  | { type: 'openOptions' }
   | { type: 'cacheStats' }
-  | { type: 'cacheClear' };
+  | { type: 'cacheClear' }
+  | { type: 'zhSuggest'; q: string; limit?: number }
+  | { type: 'zhResolve'; q: string };
 
 export interface BootstrapResp {
   settings: Settings;

@@ -52,6 +52,9 @@ export function buildTranslatedFragment(text: string, links: RawBlock['links'], 
 /** 生成译文节点；无有效译文（词典无命中/原样返回）时返回 null 不插入 */
 export function renderResult(rec: RawBlock, out: BlockOut | undefined, linkTexts: LinkTexts): HTMLElement | null {
   if (!out?.ok || !out.translation) return null;
+  // AI 失败回退块：即使块内链接有译名也不渲染——"原文+译名链接"看起来像翻了一半，
+  // 实际整块没翻（宿主已进补翻重试队列，滚动/重开会话时补翻）
+  if (out.failed) return null;
   const tr = out.translation.trim();
   const hasTranslatedLinks = [...rec.links.keys()].some(id => linkTexts.has(id));
   // 词典模式：译文与原文相同（无裸词命中）时，若块内链接文字有官方译名，
@@ -59,6 +62,14 @@ export function renderResult(rec: RawBlock, out: BlockOut | undefined, linkTexts
   if (!tr || (tr === rec.text.trim() && !hasTranslatedLinks)) return null;
   const div = document.createElement('div');
   div.className = 'tw-tr' + (rec.kind === 'cell' ? ' tw-tr-cell' : '');
+  // 镜像宿主对齐：navbox 表格等 text-align:center 容器里，译文若保持默认左对齐，
+  // 会与居中的原文错位（首词贴到单元格左缘、其余悬在半空）。
+  // 左对齐宿主不动，维持色条缩进样式
+  const hostAlign = rec.el ? getComputedStyle(rec.el).textAlign : '';
+  if (hostAlign === 'center' || hostAlign === 'right' || hostAlign === 'end') {
+    div.classList.add('tw-tr-mirror');
+    div.style.textAlign = hostAlign;
+  }
   div.dataset.twMode = out.viaAI ? 'ai' : 'dict';
   div.dataset.twId = rec.id;
   div.append(buildTranslatedFragment(tr, rec.links, rec.icons, linkTexts));
@@ -82,9 +93,11 @@ function firstBlockChild(el: HTMLElement): Element | null {
 export function insert(div: HTMLElement, rec: RawBlock): void {
   if (!rec.el || !rec.el.isConnected) return;
   if (rec.kind === 'cell') {
-    // 纯链接 li（目录项等）嵌套子列表时，译文须插在自身文字之后、子列表之前
-    const nested = rec.el.tagName === 'LI' ? firstBlockChild(rec.el) : null;
-    if (nested) nested.insertAdjacentElement('beforebegin', div);
+    // 采集时记录的嵌套块中断点（ability-box 标题等行内前奏）：译文插到它之前，
+    // 与源文本相邻；否则纯链接 li（目录项等）嵌套子列表时，插在自身文字之后、
+    // 子列表之前；都没有才追加到宿主末尾
+    if (rec.beforeEl && rec.beforeEl.isConnected) rec.beforeEl.insertAdjacentElement('beforebegin', div);
+    else if (rec.el.tagName === 'LI' && firstBlockChild(rec.el)) firstBlockChild(rec.el)!.insertAdjacentElement('beforebegin', div);
     else rec.el.appendChild(div);
   } else {
     const prev = lastNode.get(rec.el);

@@ -1,5 +1,5 @@
 /** background 入口 — 消息路由 / 词表定时更新 */
-import { ensureGlossary, glossaryMeta, updateGlossary, updateRemoteLayers, UpdateResult } from './glossary';
+import { ensureGlossary, glossaryMeta, updateGlossary, updateRemoteLayers, zhResolve, zhSuggest, UpdateResult } from './glossary';
 import { translateBlocks, aiTest, cacheStats, cacheClear, invalidateStaleCache } from './translate';
 import { getSettings } from './settings';
 import { api } from '../shared/api';
@@ -39,10 +39,12 @@ api.runtime.onStartup.addListener(() => {
 
 api.alarms.onAlarm.addListener(alarm => {
   if (alarm.name !== 'glossaryCheck') return;
-  updateGlossary(false).then(r => {
-    if (r.updated) console.log('glossary auto-updated, count=', r.count);
-    return sweepStaleCache(false, r.updated);
-  });
+  updateGlossary(false)
+    .then(r => {
+      if (r.updated) console.log('glossary auto-updated, count=', r.count);
+      return sweepStaleCache(false, r.updated);
+    })
+    .catch(e => console.warn('glossary update failed:', e));
   // 语言层 + 人工层：GitHub 托管仓库按 sha 增量拉取。
   // 自动失败不主动打扰（设置页"上次拉取"时间侧面体现），手动检查失败才在设置页提示。
   updateRemoteLayers(false)
@@ -60,7 +62,7 @@ api.storage.onChanged.addListener((changes, area) => {
   scheduleGlossaryCheck();
 });
 
-type Msg = { type: string; blocks?: Array<{ id: string; text: string }>; force?: boolean };
+type Msg = { type: string; blocks?: Array<{ id: string; text: string }>; force?: boolean; q?: string; limit?: number };
 
 api.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
   (async () => {
@@ -77,11 +79,6 @@ api.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
         const settings = await getSettings();
         const r = await translateBlocks(msg.blocks || [], settings);
         sendResponse({ results: r.results, aiFailed: r.aiFailed, aiError: r.aiError });
-        break;
-      }
-      case 'openOptions': {
-        void api.runtime.openOptionsPage();
-        sendResponse({ ok: true });
         break;
       }
       case 'cacheStats': {
@@ -108,6 +105,17 @@ api.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
       case 'aiTest': {
         const s = await getSettings();
         sendResponse(await aiTest(s));
+        break;
+      }
+      // 搜索框中文术语支持（纯词表反向查询，不依赖 AI Key）
+      case 'zhSuggest': {
+        await ensureGlossary();
+        sendResponse({ items: zhSuggest(msg.q ?? '', msg.limit) });
+        break;
+      }
+      case 'zhResolve': {
+        await ensureGlossary();
+        sendResponse(zhResolve(msg.q ?? ''));
         break;
       }
       default:

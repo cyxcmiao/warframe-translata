@@ -1,5 +1,5 @@
 /**
- * build_ext.js — 构建扩展产物到 dist/chrome 与 dist/firefox
+ * build_ext.js — 构建扩展产物到 dist/chrome、dist/edge 与 dist/firefox
  * 用法: npm run build
  */
 'use strict';
@@ -26,21 +26,27 @@ const staticFiles = [
   ['options/options.css', 'options/options.css'],
   ['popup/popup.html', 'popup/popup.html'],
   ['popup/popup.css', 'popup/popup.css'],
-  ['manifest.chrome.json', null], // per-target
-  ['manifest.firefox.json', null],
   [path.join(ROOT, 'data/de_names.json'), 'data/de_names.json'],
   [path.join(ROOT, 'data/mechanism_terms.json'), 'data/mechanism_terms.json'],
   [path.join(ROOT, 'data/lang_terms.json'), 'data/lang_terms.json'],
   [path.join(ROOT, 'data/manual_overrides.json'), 'data/manual_overrides.json'],
 ];
 
+// 三端 target → manifest 文件（Edge 与 Chrome 同为 MV3 service worker，manifest 内容一致）
+const TARGETS = {
+  chrome: 'manifest.chrome.json',
+  edge: 'manifest.edge.json',
+  firefox: 'manifest.firefox.json',
+};
+
 function copy(from, to) {
   fs.mkdirSync(path.dirname(to), { recursive: true });
   fs.copyFileSync(from, to);
 }
 
-for (const target of ['chrome', 'firefox']) {
+for (const [target, manifestSrc] of Object.entries(TARGETS)) {
   const outdir = path.join(DIST, target);
+  fs.rmSync(outdir, { recursive: true, force: true }); // 清空重建，防陈旧文件混入
 
   esbuild.buildSync({
     entryPoints,
@@ -58,13 +64,16 @@ for (const target of ['chrome', 'firefox']) {
   // 静态文件
   for (const [from, to] of staticFiles) {
     const src = path.isAbsolute(from) ? from : path.join(EXT, from);
-    let dst = to;
-    if (to === null) {
-      if (!from.includes(target)) continue; // 只拷贝对应 target 的 manifest
-      dst = 'manifest.json';
-    }
-    copy(src, path.join(outdir, dst));
+    copy(src, path.join(outdir, to));
   }
+
+  // 图标
+  for (const name of fs.readdirSync(path.join(EXT, 'icons'))) {
+    copy(path.join(EXT, 'icons', name), path.join(outdir, 'icons', name));
+  }
+
+  // manifest
+  copy(path.join(EXT, manifestSrc), path.join(outdir, 'manifest.json'));
 
   // manifest 版本号与 package.json 同步
   const mfPath = path.join(outdir, 'manifest.json');

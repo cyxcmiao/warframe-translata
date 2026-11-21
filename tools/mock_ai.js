@@ -22,6 +22,9 @@ function startMockAI(port, delayMs = 0) {
         try {
           const body = JSON.parse(data);
           const user = body.messages.find(m => m.role === 'user')?.content || '';
+          if (process.env.MOCK_LOG) {
+            for (const l of user.split('\n')) console.error('[mock]', l.slice(0, 160));
+          }
           const numbered = user.split(/文本：\n/)[1] || '';
           const out = numbered.split('\n').map(line => {
             const m = line.match(/^\[(\d+)\] (.*)$/);

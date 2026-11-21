@@ -8,7 +8,6 @@
  *  4. 缓存 key 带提示词版本前缀（tr|5|，与 const.ts PROMPT_VERSION 同步，改 prompt/机制表时两者一起改）
  *  5. AI 用量统计：requests === 请求数，tokens > 0
  *  6. 视口懒翻译：屏外块挂起不翻，滚动到底部后放行翻完
- *  7. 未配置 Key 时点悬浮按钮 → 打开设置页（而不是把站点记为停用）
  */
 'use strict';
 const path = require('path');
@@ -124,14 +123,6 @@ async function dumpTcache(sw) {
   await page.goto('https://wiki.warframe.com/w/Cache_Test', { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(1500); // content script boot
 
-  // ---- 断言 7：未配置 Key，点 FAB 打开设置页 ----
-  await page.mouse.click(1280 - 30, 900 - 28);
-  let optionsOpened = false;
-  for (let i = 0; i < 20 && !optionsOpened; i++) {
-    await page.waitForTimeout(500);
-    optionsOpened = context.pages().some(p => p.url().includes('options'));
-  }
-
   // 注入 AI 设置 → content 监听到 Key 出现，自动开翻
   let sw = null;
   for (let i = 0; i < 40 && !sw; i++) {
@@ -191,7 +182,6 @@ async function dumpTcache(sw) {
     && usage.completion > 0;
 
   const result = {
-    optionsOpened,
     aiRequests: bodies.length,
     aiLineCount: aiLines.length,
     unitLeaked,
@@ -211,8 +201,21 @@ async function dumpTcache(sw) {
   await context.close();
   server.close();
 
-  const ok = optionsOpened
-    && bodies.length === 1
+  // 回显假译文行：首次请求失败后，滚动放行挂起块时搭车补翻一次（仍失败即静默，
+  // autoRetried 限一次）。重试请求只允许重发失败的回显行，已成功块绝不重发（走缓存）。
+  const retryUser = bodies.length > 1
+    ? (bodies[bodies.length - 1].messages.find(m => m.role === 'user')?.content || '')
+    : '';
+  const retryLines = bodies.length > 1
+    ? (retryUser.split(/文本：\n/)[1] || '').split('\n').map(l => (l.match(/^\[\d+\] (.*)$/) || ['', l])[1].trim())
+    : [];
+  const retryOnlyEcho = bodies.length === 2
+    && retryLines.length === 1
+    && echoedLine
+    && retryLines[0] === echoedLine.trim();
+
+  const ok = bodies.length === 2
+    && retryOnlyEcho
     && unitLeaked.length === 0
     && mechInTerms
     && fillerLeaked.length === 0
@@ -224,5 +227,6 @@ async function dumpTcache(sw) {
     && dictCached
     && usageOk;
   console.log(ok ? 'PASS' : 'FAIL');
+  if (!ok) console.error('detail:', JSON.stringify({ bodies: bodies.length, retryLines, retryOnlyEcho, echoedLine }));
   process.exit(ok ? 0 : 1);
 })().catch(e => { console.error('TEST FAILED:', e); process.exit(1); });

@@ -2,7 +2,8 @@
  * dom.ts — wiki 页面正文抽取
  *
  * 只取 #mw-content-text 内的文本块（p/li/h1-h6/td/th/figcaption/...），
- * 跳过导航、编辑链接、代码块、参考资料等区域。
+ * 跳过编辑链接、代码块、参考资料等区域（navbox 底部导航盒参与翻译：
+ * 懒翻译 + 词典终局使其成本可控，且其内容是用户会读的索引信息）。
  * 行内链接 token 化为 ⟦n⟧（翻译时占位，渲染时还原成 <a>）。
  * 行内小图标（能量球/伤害类型等）同样 token 化，渲染时克隆还原。
  */
@@ -30,12 +31,20 @@ export interface RawBlock {
   text: string;
   links: Map<number, LinkRef>;
   icons: Map<number, IconRef>;
+  /** cell 块：宿主内序列化中断点（首个被拆出去的嵌套块），译文插到它之前而非宿主末尾 */
+  beforeEl?: Element;
 }
 
 const BLOCK_SEL = [
   'p', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'dd', 'dt', 'figcaption', 'caption', 'blockquote',
   'th', 'td', '.pi-data-value',
+  // 商店模板（offeringsBox）的物品名/描述是普通 div 文本，其余采集器覆盖不到
+  '.offeringsBoxName', '.offeringsBoxDes',
+  // Tabber 面板（TabberNeue）：正文常为裸内联文本（不包 p），不进候选就永远
+  // 没人采集（Nightwatch Corps 页 Brunt Lancer 等面板整段英文）；包 p 的部分
+  // 由 BLOCKISH 中断拆给 p 自己，面板只序列化裸文本，不重复采集
+  '.tabbertab',
   // 评论插件（Yappin）的正文容器，滚动后由前端注入
   '.comment-body', '.comment-text',
 ].join(',');
@@ -43,7 +52,7 @@ const BLOCK_SEL = [
 const SKIP_SEL = [
   'script', 'style', 'pre', 'code', 'kbd', 'samp', 'textarea',
   '.mw-editsection', 'sup.reference', '.mw-references-wrap', '.reference',
-  '.navbox', '.catlinks', '.printfooter', '.mw-cite-backlink',
+  '.catlinks', '.printfooter', '.mw-cite-backlink',
   '.noprint', '.ambox', '.mbox-small', '.toccolours', '.mw-highlight',
   '#siteNotice', '.page-footer', '.page-header', '.article-footer',
   '.selflink', '.mw-empty-elt', '.navbox-styles', '.module-shortcutboxplain',
@@ -52,6 +61,12 @@ const SKIP_SEL = [
   // #tooltip-wrapper 浮层，届时 MutationObserver 增量采集按需翻译——预翻全被
   // 0 高容器裁剪（IO 永不相交）且 hover 移动后会被 doneEls 去重吞掉
   '#tooltip-storage',
+  // Tabber 的 tab 导航条（站点 JS 运行时生成）：交互式 UI，译文块插进 <li> 会
+  // 撑爆 tab 栏长出一条假 tab；tab 内容面板（.tabbertab）照常采集翻译
+  '.tabbernav',
+  // 搜索框中文术语候选（searchbox 注入进站点建议下拉的条目）：主文本就是
+  // 中文，被采集会产生英文→假译名的回环
+  '.tw-zh-item',
 ].join(',');
 
 /** 这些块级元素在行内序列化时中断（它们自己会被单独采集） */
@@ -69,6 +84,20 @@ export function findContentRoot(): HTMLElement | null {
   );
 }
 
+/**
+ * 页面大标题（Vector 的 h1#firstHeading / Fandom 的 .page-header__title）。
+ * 在 #mw-content-text 之外（正文根采集不到；Fandom 下 .page-header 还整体在
+ * SKIP_SEL 里），须由 collectAndEnqueue 显式补采。标题是纯文本（无链接/图标），
+ * 直接构造 RawBlock，不经过 collectBlocks。
+ */
+export function collectPageTitle(): RawBlock | null {
+  const el = document.querySelector<HTMLElement>('#firstHeading, .page-header__title');
+  if (!el) return null;
+  const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+  if (text.length < 2 || !/[A-Za-z]/.test(text)) return null;
+  return { id: 't0', el, kind: 'block', text, links: new Map(), icons: new Map() };
+}
+
 /** 行内小图标的最大尺寸（px），超过视为正文插图不当作图标 */
 const ICON_MAX_PX = 64;
 
@@ -78,6 +107,8 @@ let globalTokenSeq = 0;
 class Collector {
   links = new Map<number, LinkRef>();
   icons = new Map<number, IconRef>();
+  /** 本块序列化期间的中断点（BLOCKISH 拆出子块的元素），文档序 */
+  cutEls: Element[] = [];
 
   /**
    * 判断元素是否为"纯图标包装"：本身是图标（img/svg/mw:File span），
@@ -156,7 +187,21 @@ class Collector {
         out += makeToken(id);
         continue;
       }
-      if (BLOCKISH.has(tag)) continue; // 嵌套块单独采集
+      if (BLOCKISH.has(tag)) {
+        // 嵌套块单独采集；但若该块内部没有任何可采集后代（如 navbox 列表单元格的
+        // <td><div>链接•链接</div></td> 包装），中断会让整块内容随 DIV 丢失——
+        // 此时按行内内容透传。含可采集后代（table/li 等）仍中断，防双重采集。
+        // P 无条件中断：p 自身是采集候选，在 td/li 等宿主里透传会让宿主级译文把
+        // 各 p 的内容整段复读（ability-box 信息框 = 标题内联 + 描述 p + introduced p，
+        // 渲染成 3 段重复译文）；中断后宿主块只剩 p 之外的行内内容（如物品标题）。
+        // 本扩展插入的译文块（.tw-tr）绝不透传：重采集（补翻重试）时会把旧译文当源文本
+        if (!e.classList.contains('tw-tr') && !e.closest('.tw-tr') && tag !== 'P' && !e.querySelector(BLOCK_SEL)) {
+          out += this.serialize(e);
+        } else {
+          this.cutEls.push(e); // 中断点：宿主行内前奏的译文应插到它之前（见 RawBlock.beforeEl）
+        }
+        continue;
+      }
       out += this.serialize(e);
     }
     return out;
@@ -228,7 +273,9 @@ export function collectBlocks(
     const savedIcons = col.icons;
     col.links = links;
     col.icons = icons;
+    col.cutEls = [];
     let text = col.serialize(el).trim();
+    const firstCut = col.cutEls[0] ?? undefined;
     col.links = savedLinks;
     col.icons = savedIcons;
     // 合并前从全局链接表注册
@@ -238,10 +285,11 @@ export function collectBlocks(
     for (const [id, ic] of icons) {
       if (!savedIcons.has(id)) savedIcons.set(id, ic);
     }
-    // 纯占位符块: 容器（表头/目录项等）里只有一个链接、无自属文字。
-    // 不能丢 —— 链接块拿到译名后按 cell 渲染进容器（Rank 这类表头、目录条目）
+    // 纯占位符块: 容器（表头/目录项等）里只有链接、无自属字母文字（含
+    // "⟦1⟧ ⟦2⟧ 250%" 这类 链接+纯数字 组合）。不能丢 —— 链接块拿到译名后按
+    // cell 渲染进容器（Rank 这类表头、目录条目、"Enemy Health 250%" 修饰列表）
     const visible = text.replace(tokenRegex, '').trim();
-    const pureLink = visible.length === 0 && [...links.values()].some(l => /[A-Za-z]/.test(l.text));
+    const pureLink = !/[A-Za-z]/.test(visible) && [...links.values()].some(l => /[A-Za-z]/.test(l.text));
     if (!pureLink) {
       if (text.length < 2 || !/[A-Za-z]/.test(text)) continue;
       // 跳过 JSON/数据块（模板内嵌数据、Lua 表等）
@@ -249,7 +297,9 @@ export function collectBlocks(
       if (visible.length < 2) continue;
     }
 
-    const kind: BlockKind = pureLink || el.tagName === 'TD' || el.tagName === 'TH' || el.classList.contains('pi-data-value')
+    // tabbertab 面板按 cell 渲染：译文块插进面板内部（appendChild/首个嵌套块前），
+    // 显隐跟随面板；按 block 渲染会插到面板后面，落在 tabber 结构外永远可见
+    const kind: BlockKind = pureLink || el.tagName === 'TD' || el.tagName === 'TH' || el.classList.contains('pi-data-value') || el.classList.contains('tabbertab')
       ? 'cell'
       : 'block';
 
@@ -264,7 +314,11 @@ export function collectBlocks(
         continue;
       }
     }
-    blocks.push({ id: `${base}b${idx}`, el, kind, text, links, icons });
+    // cell 块记录首个中断点：宿主的行内内容（ability-box 标题等）译文插到
+    // 被拆出的首个嵌套块之前，而不是追加到宿主末尾（位置远离源文本）。
+    // tabbertab 例外：面板首个 BLOCKISH 子节点常是空的 mw-empty-elt 占位 p，
+    // 用它做 beforeEl 会把译文插到面板最顶上（原文之上）——面板译文固定放末尾
+    blocks.push({ id: `${base}b${idx}`, el, kind, text, links, icons, beforeEl: kind === 'cell' && !el.classList.contains('tabbertab') ? firstCut : undefined });
     idx++;
   }
 

@@ -8,10 +8,12 @@
  */
 import { idbOpen, idbGet, idbPut } from '../shared/idb';
 import { TermMatcher } from '../shared/matcher';
+import { ZhMatcher } from '../shared/zhmatch';
 import { GITEE_REPO, LANG_TERMS_REPO } from '../shared/const';
 import type { GlossaryMeta, TermEntry } from '../shared/types';
 import { todayStr, sha256hex, b64ToUtf8 } from '../shared/util';
 import { EXPORT_BASES, fetchIndex, fetchExport, rebuildTerms } from './exporter';
+import { api } from '../shared/api';
 
 const DB_NAME = 'tw';
 const DB_VERSION = 1;
@@ -31,6 +33,8 @@ let db: IDBDatabase | null = null;
 let record: GlossaryRecord | null = null;
 let matcher: TermMatcher | null = null;
 let retainedMatcher: TermMatcher | null = null;
+/** 反向匹配器（zh→en）：搜索框中文术语支持，随词表重建同步刷新 */
+let zhMatcher: ZhMatcher | null = null;
 let entryList: TermEntry[] = [];
 /**
  * 三个补充/人工层的运行时状态。加载与更新统一走 LAYERS 表：
@@ -90,7 +94,7 @@ interface Snapshot {
 }
 
 async function loadSnapshot(): Promise<Snapshot> {
-  const url = chrome.runtime.getURL('data/de_names.json');
+  const url = api.runtime.getURL('data/de_names.json');
   return JSON.parse(await (await fetch(url)).text()) as Snapshot;
 }
 
@@ -140,7 +144,7 @@ const MIRROR_SOURCES = (repo: string, file: string): MirrorSource[] => {
 /** 读扩展内置的层文件：lang_terms.json 是 {terms:{...}}，mech/overrides 是平面对象 */
 async function loadBundledLayer(file: string): Promise<{ terms: Record<string, string>; sha: string }> {
   try {
-    const text = await (await fetch(chrome.runtime.getURL(file))).text();
+    const text = await (await fetch(api.runtime.getURL(file))).text();
     const parsed = JSON.parse(text) as Record<string, string> | { terms?: Record<string, string> };
     const terms =
       (parsed as { terms?: Record<string, string> }).terms ?? (parsed as Record<string, string>) ?? {};
@@ -168,14 +172,16 @@ async function loadLayerState(spec: LayerSpec): Promise<void> {
   } catch {
     /* IDB 不可用则直接用内置快照 */
   }
-  const bundled = await loadBundledLayer(spec.file);
   if (rec && isTermsObject(rec.terms) && Object.keys(rec.terms).length) {
+    // 远程层有效：直接用 IDB 记录。内置快照的 fetch+parse+sha256 必须跳过——
+    // lang_terms.json 数百 KB，SW 每次冷启动都白加载一遍是可感知的固定延迟。
     layerTerms[spec.id] = rec.terms;
     layerSha[spec.id] = rec.sha;
-  } else {
-    layerTerms[spec.id] = bundled.terms;
-    layerSha[spec.id] = bundled.sha;
+    return;
   }
+  const bundled = await loadBundledLayer(spec.file);
+  layerTerms[spec.id] = bundled.terms;
+  layerSha[spec.id] = bundled.sha;
 }
 
 /**
@@ -287,6 +293,7 @@ function installRecord(rec: GlossaryRecord): void {
   entryList = Object.entries(merged).map(([en, zh]) => ({ en, zh }));
   matcher = new TermMatcher(entryList);
   retainedMatcher = new TermMatcher((rec.retained ?? []).map(en => ({ en, zh: en })));
+  zhMatcher = new ZhMatcher(entryList);
 }
 
 export async function ensureGlossary(): Promise<void> {
@@ -330,6 +337,18 @@ export function getMatcher(): TermMatcher {
 export function getRetainedMatcher(): TermMatcher {
   if (!retainedMatcher) throw new Error('glossary not ready');
   return retainedMatcher;
+}
+
+/** 搜索框中文前缀候选（词表反向查询） */
+export function zhSuggest(q: string, limit?: number): ReturnType<ZhMatcher['suggest']> {
+  if (!zhMatcher) throw new Error('glossary not ready');
+  return zhMatcher.suggest(q, limit);
+}
+
+/** 搜索提交前的中文查询改写（zh 片段 → en 术语） */
+export function zhResolve(q: string): ReturnType<ZhMatcher['resolve']> {
+  if (!zhMatcher) throw new Error('glossary not ready');
+  return zhMatcher.resolve(q);
 }
 
 export function glossaryMeta(): GlossaryMeta {
@@ -425,7 +444,9 @@ export async function updateGlossary(force = false): Promise<UpdateResult> {
       }
       return result;
     } catch (e) {
-      console.error('glossary update failed:', e);
+      // 后台自动路径降为 warn：DE 拉取失败是常见网络状况，console.error 会点亮扩展
+      // 管理页的「错误」按钮（后台失败不打扰约定）；手动检查的失败已在设置页提示
+      console.warn('glossary update failed:', e);
       return { updated: false, count: entryList.length, error: String(e) };
     } finally {
       updating = null;

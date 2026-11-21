@@ -26,6 +26,27 @@ const MAX_TERMS_PER_REQ = 60;
  */
 const AI_CONCURRENCY = 6;
 
+/**
+ * 跨消息全局并发闸：内容侧管道化后同屏可能同时有多条 translate 消息在途，
+ * 各消息自己的并发池会叠加。这里用全局信号量兜住 AI 请求总量的上限，
+ * 对第三方保守限流的接口避免主动触发 429（超限由 chatWithRetry 退避兜底）。
+ */
+const GLOBAL_AI_CAP = 9;
+let globalActive = 0;
+const globalWaiters: Array<() => void> = [];
+async function acquireAiSlot(): Promise<void> {
+  if (globalActive < GLOBAL_AI_CAP) {
+    globalActive++;
+    return;
+  }
+  await new Promise<void>(r => globalWaiters.push(() => { globalActive++; r(); }));
+}
+function releaseAiSlot(): void {
+  const w = globalWaiters.shift();
+  if (w) w(); // 唤醒等待者直接移交名额，计数不归零避免抖动
+  else globalActive--;
+}
+
 interface CacheVal {
   translation: string;
   viaAI: boolean;
@@ -33,6 +54,8 @@ interface CacheVal {
   text?: string;
   /** 落缓存时块内命中的词条 en→zh：与更新后词表的重匹配结果比对，有差异即失效 */
   termsUsed?: Record<string, string>;
+  /** 仅在途传递（不落缓存）：AI 失败回退块，content 据此跳过渲染并补翻重试 */
+  failed?: boolean;
 }
 
 let tdb: IDBDatabase | null = null;
@@ -272,8 +295,16 @@ export async function translateBlocks(blocks: BlockIn[], settings: Settings): Pr
   const shared: Array<{ id: string; p: Promise<CacheVal> }> = [];
   const resolvers = new Map<string, (v: CacheVal) => void>();
 
-  // 1. 扫描：查缓存 → 命中直接出结果；未命中立即原子注册 inflight
-  for (const b of blocks) {
+  // 1. 扫描：查缓存 → 命中直接出结果；未命中立即原子注册 inflight。
+  //    sha256 + IDB 读全部并行（逐块串行 await 在百块级页面上是可感知的固定延迟）；
+  //    之后的循环全程同步，inflight 的查注册依然无交错窗口。
+  const prepared = await Promise.all(
+    blocks.map(async b => {
+      const key = await cacheKey(b.text, settings);
+      return { b, key, hit: await getCache(key) };
+    }),
+  );
+  for (const { b, key, hit } of prepared) {
     if (!b.text.trim()) {
       results[b.id] = { id: b.id, ok: false, error: 'empty' };
       continue;
@@ -284,8 +315,6 @@ export async function translateBlocks(blocks: BlockIn[], settings: Settings): Pr
       results[b.id] = { id: b.id, ok: true, translation: b.text };
       continue;
     }
-    const key = await cacheKey(b.text, settings);
-    const hit = await getCache(key);
     if (hit) {
       results[b.id] = { id: b.id, ok: true, translation: hit.translation, viaAI: hit.viaAI };
       continue;
@@ -322,6 +351,7 @@ export async function translateBlocks(blocks: BlockIn[], settings: Settings): Pr
     const done = new Map<string, CacheVal>();
 
     try {
+      await acquireAiSlot();
       try {
         const numbering = inChunk.map((it, i) => `[${i + 1}] ${it.job.text}`).join('\n');
         const termBlock = terms.length
@@ -354,20 +384,24 @@ export async function translateBlocks(blocks: BlockIn[], settings: Settings): Pr
         console.warn('AI chunk failed:', e);
         aiFailed = true;
         aiError ??= classifyAiError(e);
+      } finally {
+        releaseAiSlot();
       }
     } finally {
       // 无论成功失败，该批全部落定：resolve 等待者 + 移除 inflight（失败块保留原文、不落缓存）
       for (const it of inChunk) {
         const v = done.get(it.job.key);
         if (v) putCache(it.job.key, v).catch(() => {});
-        const out: CacheVal = v ?? { translation: it.job.text, viaAI: false };
+        const out: CacheVal = v ?? { translation: it.job.text, viaAI: false, failed: true };
         const res = resolvers.get(it.job.key);
         if (res) {
           res(out);
           resolvers.delete(it.job.key);
         }
         inflight.delete(it.job.key);
-        results[it.job.id] = { id: it.job.id, ok: true, translation: out.translation, viaAI: out.viaAI };
+        // AI 失败/校验不过的块显式标记 failed：content 据此跳过渲染（避免"原文+译名链接"
+        // 的误导性半翻译）并记入补翻重试队列；成功块 failed 缺省
+        results[it.job.id] = { id: it.job.id, ok: true, translation: out.translation, viaAI: out.viaAI, failed: !v };
       }
     }
   };
@@ -385,7 +419,7 @@ export async function translateBlocks(blocks: BlockIn[], settings: Settings): Pr
   for (const s of shared) {
     const v = await withTimeout(s.p, 120000);
     results[s.id] = v
-      ? { id: s.id, ok: true, translation: v.translation, viaAI: v.viaAI }
+      ? { id: s.id, ok: true, translation: v.translation, viaAI: v.viaAI, failed: v.failed }
       : { id: s.id, ok: false, error: 'shared-timeout' };
   }
 

@@ -12,6 +12,7 @@ const inputs = {
   aiModel: $('aiModel') as HTMLInputElement,
   autoTranslate: $('autoTranslate') as HTMLInputElement,
   translateComments: $('translateComments') as HTMLInputElement,
+  zhSearch: $('zhSearch') as HTMLInputElement,
   fontSize: $('fontSize') as HTMLInputElement,
   color: $('color') as HTMLInputElement,
   toggleShortcut: $('toggleShortcut') as HTMLInputElement,
@@ -25,6 +26,7 @@ async function load(): Promise<Settings> {
   inputs.aiModel.value = s.aiModel;
   inputs.autoTranslate.checked = s.autoTranslate;
   inputs.translateComments.checked = s.translateComments;
+  inputs.zhSearch.checked = s.zhSearch;
   inputs.fontSize.value = String(s.fontSize);
   inputs.color.value = s.color;
   inputs.toggleShortcut.value = s.toggleShortcut;
@@ -38,6 +40,7 @@ function collect(): Settings {
     aiModel: inputs.aiModel.value.trim(),
     autoTranslate: inputs.autoTranslate.checked,
     translateComments: inputs.translateComments.checked,
+    zhSearch: inputs.zhSearch.checked,
     fontSize: Math.min(20, Math.max(11, Number(inputs.fontSize.value) || DEFAULT_SETTINGS.fontSize)),
     color: inputs.color.value,
     toggleShortcut: inputs.toggleShortcut.value.trim(),

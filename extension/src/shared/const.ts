@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS: Settings = {
   color: '#4a90d9',
   toggleShortcut: 'Ctrl+Alt+D',
   glossaryCheckHours: 24,
+  zhSearch: true,
 };
 
 /**
@@ -27,7 +28,6 @@ export const GITEE_REPO = 'cyxcmiao/warframe-translata';
 
 export const STORAGE_KEYS = {
   settings: 'settings',
-  siteEnabled: 'siteEnabled', // { [origin]: boolean }
   usage: 'usage', // { month, prompt, completion, requests }
 } as const;
 

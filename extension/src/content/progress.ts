@@ -1,5 +1,5 @@
 /**
- * progress.ts — 顶部灵动岛式进度胶囊（Shadow DOM 隔离样式，同 FAB/Toast）
+ * progress.ts — 顶部灵动岛式进度胶囊（Shadow DOM 隔离样式，同 Toast）
  *
  * 翻译进行中的全局反馈：页顶居中一颗短胶囊（深色毛玻璃，backdrop-filter），
  * 内部按 已完成/剩余 推进彩色填充，清空后定格 100% 短暂停留再缩出淡去。

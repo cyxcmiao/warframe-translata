@@ -26,6 +26,20 @@
   font-size: calc(var(--tw-tr-font-size, 14px) - 1px);
 }
 
+/* 居中/右对齐宿主（navbox 表格等）：译文镜像宿主对齐（renderer 加 tw-tr-mirror +
+   内联 text-align），左侧色条会脱离居中文字悬在单元格边缘，去掉缩进与色条 */
+.tw-tr.tw-tr-mirror {
+  margin-left: 0;
+  padding-left: 0;
+  border-left: none;
+}
+
+/* 搜索框术语候选（searchbox 注入进站点建议下拉的 li）：
+   复用站点 cdx 原生样式，inset 色条区分词条来源，不参与站点键盘导航 */
+li.tw-zh-item {
+  box-shadow: inset 3px 0 0 var(--tw-tr-color, #4a90d9);
+}
+
 /* 标题下的译文 */
 h1.tw-host + .tw-tr, h2 + .tw-tr, h3 + .tw-tr, h4 + .tw-tr, h5 + .tw-tr {
   margin-top: 0;

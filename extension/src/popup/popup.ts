@@ -1,26 +1,15 @@
 /** popup 逻辑 */
 import { api } from '../shared/api';
-import { getSiteEnabled, setSiteEnabled } from '../shared/site';
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from '../shared/const';
 import type { Settings, GlossaryMeta } from '../shared/types';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
-let origin = '';
-
 async function init(): Promise<void> {
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
   const url = tab?.url;
   const isWiki = !!url && /https:\/\/wiki\.warframe\.com\//.test(url);
-  if (isWiki && url) {
-    origin = new URL(url).origin;
-    ($('siteEnabled') as HTMLInputElement).checked = await getSiteEnabled(origin);
-  } else {
-    const row = $('siteEnabled') as HTMLInputElement;
-    row.disabled = true;
-    row.checked = false;
-    $('msg').textContent = '本页不是 Warframe Wiki';
-  }
+  if (!isWiki) $('msg').textContent = '本页不是 Warframe Wiki';
 
   const o = await api.storage.local.get(STORAGE_KEYS.settings);
   const s: Settings = { ...DEFAULT_SETTINGS, ...(o[STORAGE_KEYS.settings] as Partial<Settings> | undefined) };
@@ -35,13 +24,6 @@ async function init(): Promise<void> {
     $('gloss').textContent = `词表 v${meta.version} · ${meta.count} 条 · 上次检查 ${last}`;
   }
 }
-
-$('siteEnabled').addEventListener('change', async e => {
-  if (!origin) return;
-  const on = (e.target as HTMLInputElement).checked;
-  await setSiteEnabled(origin, on);
-  await api.tabs.sendMessage(await activeTabId(), { type: on ? 'translateNow' : 'restore' });
-});
 
 $('translateNow').addEventListener('click', async () => {
   await api.tabs.sendMessage(await activeTabId(), { type: 'translateNow' });

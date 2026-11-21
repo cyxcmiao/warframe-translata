@@ -125,21 +125,21 @@ const server = http.createServer((req, res) => {
   });
   await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-  // 等扩展内容脚本就绪（悬浮按钮宿主出现），必要时刷新一次
-  let fab = false;
-  for (let i = 0; i < 8 && !fab; i++) {
+  // 等扩展内容脚本就绪（boot 早期注入的 #tw-style），必要时刷新一次
+  let ready = false;
+  for (let i = 0; i < 8 && !ready; i++) {
     await new Promise(r => setTimeout(r, 1000));
-    fab = await page.evaluate(() => !!document.querySelector('#tw-fab-host'));
+    ready = await page.evaluate(() => !!document.getElementById('tw-style'));
   }
-  if (!fab) {
-    console.log('fab missing, reload once');
+  if (!ready) {
+    console.log('tw-style missing, reload once');
     await page.reload({ waitUntil: 'domcontentloaded' });
-    for (let i = 0; i < 10 && !fab; i++) {
+    for (let i = 0; i < 10 && !ready; i++) {
       await new Promise(r => setTimeout(r, 1000));
-      fab = await page.evaluate(() => !!document.querySelector('#tw-fab-host'));
+      ready = await page.evaluate(() => !!document.getElementById('tw-style'));
     }
   }
-  if (!fab) throw new Error('content script not started (no fab)');
+  if (!ready) throw new Error('content script not started (no tw-style)');
 
   // 等翻译稳定
   let counts = [];

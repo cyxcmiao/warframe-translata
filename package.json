@@ -6,9 +6,11 @@
   "description": "Warframe 英文 Wiki 精准翻译扩展：官方词表锁术语 + AI 句子翻译",
   "scripts": {
     "build": "node tools/build_ext.js",
+    "pack": "node tools/pack.js",
+    "icons": "node tools/gen_icons.js",
     "build:data": "node tools/build_de_map.js && node tools/build_lang_terms.js",
     "typecheck": "tsc -p extension/src/test/tsconfig.json",
-    "test": "node tools/test_matcher.js && node tools/test_sweep.js"
+    "test": "node tools/test_matcher.js && node tools/test_sweep.js && node tools/test_zh_search.js"
   },
   "dependencies": {
     "lzma": "^2.3.2",

@@ -1,5 +1,5 @@
 /**
- * toast.ts — 页面内自动消散的悬浮提示（Shadow DOM 隔离样式，同 FAB）
+ * toast.ts — 页面内自动消散的悬浮提示（Shadow DOM 隔离样式）
  * 用于 API Key 未配置 / AI 接口连接失败等需要告知用户的状态。
  */
 
