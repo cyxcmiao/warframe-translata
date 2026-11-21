@@ -115,7 +115,7 @@ const LAYERS: LayerSpec[] = [
   { id: 'manualOverrides', file: 'data/manual_overrides.json', max: 5000 },
 ];
 
-/** 拉取镜像序：Gitee 主源（国内第一跳）→ GitHub raw → jsDelivr 三入口 → statically。
+/** 拉取镜像序：Gitee（国内第一跳，主源）→ GitHub raw → jsDelivr 三入口 → statically（备份）。
  *  Gitee 仓库由 Actions 从 GitHub 强制镜像（push/schedule 触发），置空串则跳过。 */
 const MIRROR_URLS = (repo: string, file: string): string[] => {
   const urls: string[] = [];

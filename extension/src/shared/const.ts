@@ -19,8 +19,8 @@ export const DEFAULT_SETTINGS: Settings = {
 export const LANG_TERMS_REPO = 'cyxcmiao/warframe-translata';
 
 /**
- * Gitee 镜像仓库（主源，国内第一跳）：同名仓库由 Actions 自动从 GitHub 强制镜像，
- * 拉取顺序 Gitee → GitHub 系。需在 Gitee 建同名空仓库 + GitHub Secrets 配
+ * Gitee 主源镜像仓库（国内第一跳，兼作 GitHub 的备份托管）：同名仓库由 Actions 自动
+ * 从 GitHub 强制镜像。需在 Gitee 建同名空仓库 + GitHub Secrets 配
  * GITEE_USER/GITEE_TOKEN（见 README「术语维护」）；置空串则跳过 Gitee 源。
  */
 export const GITEE_REPO = 'cyxcmiao/warframe-translata';
