@@ -7,7 +7,9 @@
  */
 'use strict';
 const path = require('path');
+const fs = require('fs');
 const { chromium } = require('playwright-core');
+const { startMockAI, injectAISettings } = require('./mock_ai');
 
 const ROOT = path.join(__dirname, '..');
 const DIST = path.join(ROOT, 'dist', 'chrome');
@@ -27,7 +29,11 @@ const FIXTURE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><tit
 </div></div></body></html>`;
 
 (async () => {
-  const ctx = await chromium.launchPersistentContext(path.join(__dirname, '.tmp', 'profile-fixture'), {
+  // 持久 profile 会残留陈旧的 SW 注册状态（扩展重建后 SW 不换新），每次清空保证确定性
+  const profile = path.join(__dirname, '.tmp', 'profile-fixture');
+  try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* 占用则忽略 */ }
+  const server = await startMockAI(8805);
+  const ctx = await chromium.launchPersistentContext(profile, {
     headless: false,
     args: [
       `--disable-extensions-except=${DIST}`,
@@ -36,6 +42,13 @@ const FIXTURE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><tit
       '--no-default-browser-check',
     ],
   });
+  let sw = null;
+  for (let i = 0; i < 40 && !sw; i++) {
+    await new Promise(r => setTimeout(r, 250));
+    sw = ctx.serviceWorkers().find(s => s.url().includes('background'));
+  }
+  if (!sw) throw new Error('SW not found');
+  await injectAISettings(sw, 8805);
   const page = await ctx.newPage();
   await page.setViewportSize({ width: 1280, height: 900 });
   // 拦截 wiki 域名，返回本地夹具
@@ -72,6 +85,7 @@ const FIXTURE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><tit
   console.log(JSON.stringify(r, null, 2));
   await page.screenshot({ path: path.join(__dirname, '.tmp', 'shot-fixture.png') });
   await ctx.close();
+  server.close();
   // 词典模式语义：无裸词命中的块（首句、嵌套 li）不产生译文块，total=4 属预期
   process.exit(r.total >= 4 && r.outerTrCount >= 2 && r.allBeforeNested && r.sentenceOrderKept && r.glossaryOk ? 0 : 1);
 })().catch(e => { console.error('ERR', e.message); process.exit(1); });
