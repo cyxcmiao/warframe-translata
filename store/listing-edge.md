@@ -6,7 +6,7 @@
 
 ## 提交步骤
 
-1. 注册 [Microsoft Partner Center](https://partner.microsoft.com/dashboard/microsoftedge/overview)（开发者账户一次性 $19，2026 年价以官网为准）；
+1. 注册 [Microsoft Partner Center](https://partner.microsoft.com/dashboard/microsoftedge/overview)（**免费**——微软已取消原 $19 注册费，官网 2026-11 确认）；
 2. 「创建新扩展」→ 上传 zip 包；
 3. 填写商店信息（见下）→ 提交审核（首次审核一般 1–7 天）。
 
