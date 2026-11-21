@@ -32,31 +32,39 @@ let record: GlossaryRecord | null = null;
 let matcher: TermMatcher | null = null;
 let retainedMatcher: TermMatcher | null = null;
 let entryList: TermEntry[] = [];
-/** 扩展内置的 wiki 机制术语表（官方导出没有的用语），随扩展版本更新 */
-let mechTerms: Record<string, string> = {};
-let mechLoaded = false;
-/** 游戏语言文件挖掘层（tools/build_lang_terms.js 产出，官方导出缺的 UI 复合词） */
-let langTerms: Record<string, string> = {};
-let langSha = ''; // 当前生效词条文件的 sha256（bundled 或远程拉取），增量比对基准
-let langLastCheck: string | null = null;
-let langLoaded = false;
-/** 人工覆盖层（data/manual_overrides.json）：优先级最高，修正官方/语言层译名或锁定英文（zh===en） */
-let manualOverrides: Record<string, string> = {};
-let overridesLoaded = false;
+/**
+ * 三个补充/人工层的运行时状态。加载与更新统一走 LAYERS 表：
+ * 每层 = IDB 远程记录优先（'glossary' store，key=层 id），无记录用扩展内置快照；
+ * layerSha 是当前生效内容的 sha256，作为后续增量比对基准。
+ */
+const layerTerms: Record<'mechTerms' | 'langTerms' | 'manualOverrides', Record<string, string>> = {
+  mechTerms: {},
+  langTerms: {},
+  manualOverrides: {},
+};
+const layerSha: Record<string, string> = { mechTerms: '', langTerms: '', manualOverrides: '' };
+let remoteLastCheck: string | null = null;
+let layersLoaded = false;
 let updating: Promise<UpdateResult> | null = null;
 
-/** 远程语言层词条记录（IDB store 'glossary' key 'langTerms'），存在则优先于内置快照 */
-interface LangTermsRecord {
+/** 简写别名（合并/校验用） */
+const mechTerms = () => layerTerms.mechTerms;
+const langTerms = () => layerTerms.langTerms;
+const manualOverrides = () => layerTerms.manualOverrides;
+
+/** 远程词条记录（IDB store 'glossary'，key=层 id），存在则优先于内置快照 */
+interface LayerRecord {
   terms: Record<string, string>;
   sha: string;
-  version: string;
+  version?: string;
   fetchedAt: string;
 }
 
-export interface LangUpdateResult {
-  updated: boolean;
-  count: number;
-  error?: string;
+export interface RemoteLayersResult {
+  updated: boolean; // 任一层有变化
+  changed: string[]; // 变化的层 id
+  counts: { mechTerms: number; langTerms: number; manualOverrides: number };
+  error?: string; // 各文件失败的错误（分号连接；单文件失败不影响其他层）
   /** 仓库常量未配置时跳过远程检查 */
   skipped?: boolean;
 }
@@ -86,101 +94,147 @@ async function loadSnapshot(): Promise<Snapshot> {
   return JSON.parse(await (await fetch(url)).text()) as Snapshot;
 }
 
-/** 内置机制术语表（data/mechanism_terms.json），读取失败不阻塞词表 */
-async function loadMechanisms(): Promise<Record<string, string>> {
-  try {
-    const url = chrome.runtime.getURL('data/mechanism_terms.json');
-    return JSON.parse(await (await fetch(url)).text()) as Record<string, string>;
-  } catch {
-    return {};
-  }
+/**
+ * 三个可远程更新的补充/人工层：
+ *  - mechTerms: 机制术语表（人工维护的 wiki 用语）
+ *  - langTerms: 游戏语言文件挖掘层（Actions 每日重建）
+ *  - manualOverrides: 人工覆盖层（最高优先级修正）
+ * 人工层文件直接提交在托管仓库（data/ 下，无需 Actions 加工），与语言层共用
+ * 同一套 5 镜像拉取 + sha 增量机制：push 后 24h 内自动流转到所有用户，免发版。
+ */
+interface LayerSpec {
+  id: keyof typeof layerTerms;
+  file: string;
+  min?: number; // 词条数合理性下限（防拉到截断/损坏文件）
+  max?: number;
 }
 
-/** 人工覆盖层（data/manual_overrides.json），读取失败不阻塞词表 */
-async function loadManualOverrides(): Promise<Record<string, string>> {
-  try {
-    const url = chrome.runtime.getURL('data/manual_overrides.json');
-    return JSON.parse(await (await fetch(url)).text()) as Record<string, string>;
-  } catch {
-    return {};
-  }
-}
+const LAYERS: LayerSpec[] = [
+  { id: 'mechTerms', file: 'data/mechanism_terms.json', max: 5000 },
+  { id: 'langTerms', file: 'data/lang_terms.json', min: 1000, max: 100000 },
+  { id: 'manualOverrides', file: 'data/manual_overrides.json', max: 5000 },
+];
 
-/** 游戏语言文件挖掘层（data/lang_terms.json，build_lang_terms.js 产出），读取失败不阻塞词表 */
-async function loadBundledLangTerms(): Promise<{ terms: Record<string, string>; sha: string }> {
+const MIRROR_URLS = (repo: string, file: string): string[] => [
+  `https://raw.githubusercontent.com/${repo}/main/${file}`,
+  `https://cdn.jsdelivr.net/gh/${repo}@main/${file}`,
+  `https://fastly.jsdelivr.net/gh/${repo}@main/${file}`,
+  `https://gcore.jsdelivr.net/gh/${repo}@main/${file}`,
+  `https://cdn.statically.io/gh/${repo}/main/${file}`,
+];
+
+/** 读扩展内置的层文件：lang_terms.json 是 {terms:{...}}，mech/overrides 是平面对象 */
+async function loadBundledLayer(file: string): Promise<{ terms: Record<string, string>; sha: string }> {
   try {
-    const url = chrome.runtime.getURL('data/lang_terms.json');
-    const text = await (await fetch(url)).text();
-    const parsed = JSON.parse(text) as { terms?: Record<string, string> };
-    return { terms: parsed.terms ?? {}, sha: await sha256hex(text) };
+    const text = await (await fetch(chrome.runtime.getURL(file))).text();
+    const parsed = JSON.parse(text) as Record<string, string> | { terms?: Record<string, string> };
+    const terms =
+      (parsed as { terms?: Record<string, string> }).terms ?? (parsed as Record<string, string>) ?? {};
+    return {
+      terms: terms && typeof terms === 'object' ? terms : {},
+      sha: await sha256hex(text),
+    };
   } catch {
     return { terms: {}, sha: '' };
   }
 }
 
-/**
- * 远程拉取语言层词条（GitHub Actions 每日重建 data/lang_terms.json）。
- * 按文件内容 sha 增量：不变只记检查时间，变了写入 IDB 并热重建匹配器。
- * 失败静默降级到当前生效层（内置快照或上次拉取），不阻塞翻译。
- */
-export async function updateLangTerms(force = false): Promise<LangUpdateResult> {
-  await ensureGlossary(); // 保证 langTerms/官方 record 就绪，供热重建
-  const curCount = Object.keys(langTerms).length;
-  if (!LANG_TERMS_REPO || /YOUR_GH_USER/i.test(LANG_TERMS_REPO)) {
-    return { updated: false, count: curCount, skipped: true };
-  }
-  const urls = [
-    // 多 CDN 镜像：raw 被墙时走 jsDelivr 系（多入口互备）与 statically，全部失败才降级
-    `https://raw.githubusercontent.com/${LANG_TERMS_REPO}/main/data/lang_terms.json`,
-    `https://cdn.jsdelivr.net/gh/${LANG_TERMS_REPO}@main/data/lang_terms.json`,
-    `https://fastly.jsdelivr.net/gh/${LANG_TERMS_REPO}@main/data/lang_terms.json`,
-    `https://gcore.jsdelivr.net/gh/${LANG_TERMS_REPO}@main/data/lang_terms.json`,
-    `https://cdn.statically.io/gh/${LANG_TERMS_REPO}/main/data/lang_terms.json`,
-  ];
-  let text: string | null = null;
-  let lastErr: unknown = null;
-  for (const u of urls) {
-    try {
-      const res = await fetch(u, { signal: AbortSignal.timeout(15000), cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      text = await res.text();
-      break;
-    } catch (e) {
-      lastErr = e;
-    }
-  }
-  if (text === null) {
-    return { updated: false, count: curCount, error: String(lastErr) };
-  }
-  const sha = await sha256hex(text);
-  // 增量：与当前生效内容一致（含尚未入库的内置快照）→ 只记检查时间
-  if (!force && sha === langSha) {
-    langLastCheck = new Date().toISOString();
-    return { updated: false, count: curCount };
-  }
-  let parsed: { terms?: Record<string, string>; version?: string };
+function isTermsObject(v: unknown): v is Record<string, string> {
+  return (
+    !!v && typeof v === 'object' && !Array.isArray(v) && Object.values(v).every(x => typeof x === 'string')
+  );
+}
+
+/** 单层加载：IDB 远程记录优先（运行时拉取过），无记录用内置快照；sha 作为增量基准 */
+async function loadLayerState(spec: LayerSpec): Promise<void> {
+  let rec: LayerRecord | null = null;
   try {
-    parsed = JSON.parse(text) as { terms?: Record<string, string>; version?: string };
-  } catch (e) {
-    return { updated: false, count: curCount, error: `JSON 解析失败: ${String(e)}` };
+    const d = await getDb();
+    rec = (await idbGet<LayerRecord>(d, 'glossary', spec.id)) ?? null;
+  } catch {
+    /* IDB 不可用则直接用内置快照 */
   }
-  const terms = parsed.terms ?? {};
-  if (Object.keys(terms).length < 1000) {
-    return { updated: false, count: curCount, error: `词条数异常（${Object.keys(terms).length}），放弃更新` };
+  const bundled = await loadBundledLayer(spec.file);
+  if (rec && isTermsObject(rec.terms) && Object.keys(rec.terms).length) {
+    layerTerms[spec.id] = rec.terms;
+    layerSha[spec.id] = rec.sha;
+  } else {
+    layerTerms[spec.id] = bundled.terms;
+    layerSha[spec.id] = bundled.sha;
   }
-  const rec: LangTermsRecord = {
-    terms,
-    sha,
-    version: parsed.version || todayStr(),
-    fetchedAt: new Date().toISOString(),
-  };
+}
+
+/**
+ * 远程拉取全部补充/人工层（GitHub 托管仓库；语言层由 Actions 每日重建，人工层直接提交源文件）。
+ * 按文件内容 sha 增量：不变跳过，与内置快照一致则重置回内置（清掉过期远程记录），
+ * 有变化写 IDB 并热重建匹配器。单文件失败不阻塞其他层；全部失败静默降级当前生效层。
+ */
+export async function updateRemoteLayers(force = false): Promise<RemoteLayersResult> {
+  await ensureGlossary(); // 保证各层状态与官方 record 就绪，供热重建
+  const counts = (): RemoteLayersResult['counts'] => ({
+    mechTerms: Object.keys(layerTerms.mechTerms).length,
+    langTerms: Object.keys(layerTerms.langTerms).length,
+    manualOverrides: Object.keys(layerTerms.manualOverrides).length,
+  });
+  if (!LANG_TERMS_REPO || /YOUR_GH_USER/i.test(LANG_TERMS_REPO)) {
+    return { updated: false, changed: [], counts: counts(), skipped: true };
+  }
+  const changed: string[] = [];
+  const errors: string[] = [];
+  const now = new Date().toISOString();
   const d = await getDb();
-  await idbPut(d, 'glossary', rec, 'langTerms');
-  langTerms = rec.terms;
-  langSha = rec.sha;
-  langLastCheck = rec.fetchedAt;
-  if (record) installRecord(record); // 热重建匹配器（官方层不变，只换补充层）
-  return { updated: true, count: Object.keys(terms).length };
+  for (const spec of LAYERS) {
+    let text: string | null = null;
+    let lastErr: unknown = null;
+    for (const u of MIRROR_URLS(LANG_TERMS_REPO, spec.file)) {
+      try {
+        const res = await fetch(u, { signal: AbortSignal.timeout(15000), cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        text = await res.text();
+        break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (text === null) {
+      errors.push(`${spec.id}: ${String(lastErr)}`);
+      continue;
+    }
+    const sha = await sha256hex(text);
+    if (!force && sha === layerSha[spec.id]) continue; // 增量：与当前生效一致
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      errors.push(`${spec.id}: JSON 解析失败`);
+      continue;
+    }
+    const terms =
+      spec.id === 'langTerms'
+        ? ((parsed as { terms?: Record<string, string> }).terms ?? {})
+        : (parsed as Record<string, string>);
+    if (!isTermsObject(terms)) {
+      errors.push(`${spec.id}: 数据格式异常`);
+      continue;
+    }
+    const n = Object.keys(terms).length;
+    if ((spec.min && n < spec.min) || (spec.max && n > spec.max)) {
+      errors.push(`${spec.id}: 词条数异常（${n}），放弃更新`);
+      continue;
+    }
+    const rec: LayerRecord = { terms, sha, fetchedAt: now };
+    await idbPut(d, 'glossary', rec, spec.id);
+    layerTerms[spec.id] = terms;
+    layerSha[spec.id] = sha;
+    changed.push(spec.id);
+  }
+  if (changed.length) {
+    remoteLastCheck = now;
+    if (record) installRecord(record); // 任一层变化 → 热重建匹配器（官方层不变）
+  } else if (!errors.length) {
+    remoteLastCheck = now;
+  }
+  return { updated: changed.length > 0, changed, counts: counts(), error: errors.length ? errors.join('; ') : undefined };
 }
 
 /**
@@ -191,12 +245,12 @@ export async function updateLangTerms(force = false): Promise<LangUpdateResult> 
  *    （修正官方过时/错误译名，或 zh===en 强制保留英文）。
  */
 function mergeGlossaryLayers(official: Record<string, string>, retained: string[]): Record<string, string> {
-  const out = { ...mechTerms, ...langTerms };
+  const out = { ...mechTerms(), ...langTerms() };
   const retainedSet = new Set(retained.map(s => s.toLowerCase()));
   for (const en of Object.keys(out)) {
     if (retainedSet.has(en.toLowerCase())) delete out[en];
   }
-  return { ...out, ...official, ...manualOverrides };
+  return { ...out, ...official, ...manualOverrides() };
 }
 
 function installRecord(rec: GlossaryRecord): void {
@@ -208,34 +262,9 @@ function installRecord(rec: GlossaryRecord): void {
 }
 
 export async function ensureGlossary(): Promise<void> {
-  if (!mechLoaded) {
-    mechTerms = await loadMechanisms();
-    mechLoaded = true;
-  }
-  if (!overridesLoaded) {
-    manualOverrides = await loadManualOverrides();
-    overridesLoaded = true;
-  }
-  if (!langLoaded) {
-    // 远程拉取过的记录优先，无记录则用扩展内置快照（sha 作为后续增量比对基准）
-    let rec: LangTermsRecord | null = null;
-    try {
-      const d = await getDb();
-      rec = (await idbGet<LangTermsRecord>(d, 'glossary', 'langTerms')) ?? null;
-    } catch {
-      /* IDB 不可用则直接用内置快照 */
-    }
-    if (rec && rec.terms && Object.keys(rec.terms).length) {
-      langTerms = rec.terms;
-      langSha = rec.sha;
-      langLastCheck = rec.fetchedAt;
-    } else {
-      const bundled = await loadBundledLangTerms();
-      langTerms = bundled.terms;
-      langSha = bundled.sha;
-      langLastCheck = null;
-    }
-    langLoaded = true;
+  if (!layersLoaded) {
+    for (const spec of LAYERS) await loadLayerState(spec);
+    layersLoaded = true;
   }
   if (record) return;
   const d = await getDb();
@@ -285,8 +314,8 @@ export function glossaryMeta(): GlossaryMeta {
     retainedCount: record.retained?.length ?? 0,
     builtAt: record.builtAt,
     lastCheck: record.lastCheck,
-    langCount: Object.keys(langTerms).length,
-    langLastCheck,
+    langCount: Object.keys(layerTerms.langTerms).length,
+    langLastCheck: remoteLastCheck,
   };
 }
 

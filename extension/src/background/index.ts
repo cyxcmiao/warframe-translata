@@ -1,5 +1,5 @@
 /** background 入口 — 消息路由 / 词表定时更新 */
-import { ensureGlossary, glossaryMeta, updateGlossary, updateLangTerms, UpdateResult } from './glossary';
+import { ensureGlossary, glossaryMeta, updateGlossary, updateRemoteLayers, UpdateResult } from './glossary';
 import { translateBlocks, aiTest, cacheStats, cacheClear } from './translate';
 import { getSettings } from './settings';
 import { api } from '../shared/api';
@@ -28,14 +28,14 @@ api.alarms.onAlarm.addListener(alarm => {
   updateGlossary(false).then(r => {
     if (r.updated) console.log('glossary auto-updated, count=', r.count);
   });
-  // 语言文件层：GitHub Actions 每日重建产物，这里按 sha 增量拉取。
+  // 语言层 + 人工层：GitHub 托管仓库按 sha 增量拉取。
   // 自动失败不主动打扰（设置页"上次拉取"时间侧面体现），手动检查失败才在设置页提示。
-  updateLangTerms(false)
+  updateRemoteLayers(false)
     .then(r => {
-      if (r.updated) console.log('lang terms auto-updated, count=', r.count);
-      else if (r.error) console.warn('lang terms update failed:', r.error);
+      if (r.updated) console.log('remote layers auto-updated:', r.changed.join('/'));
+      else if (r.error) console.warn('remote layers update failed:', r.error);
     })
-    .catch(e => console.warn('lang terms update crashed:', e));
+    .catch(e => console.warn('remote layers update crashed:', e));
 });
 
 // 设置变化 → 重排词表检查周期
@@ -82,8 +82,8 @@ api.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
         break;
       }
       case 'glossaryUpdate': {
-        const [r, lang] = await Promise.all([updateGlossary(msg.force ?? true), updateLangTerms(msg.force ?? true)]);
-        const res: UpdateResult & { lang?: { updated: boolean; count: number; error?: string } } = { ...r, lang };
+        const [r, remote] = await Promise.all([updateGlossary(msg.force ?? true), updateRemoteLayers(msg.force ?? true)]);
+        const res: UpdateResult & { remote?: { updated: boolean; changed: string[]; error?: string } } = { ...r, remote };
         sendResponse(res);
         break;
       }

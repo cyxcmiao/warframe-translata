@@ -207,22 +207,22 @@ $('glossUpdate').addEventListener('click', async () => {
     updated: boolean;
     count: number;
     error?: string;
-    lang?: { updated: boolean; count: number; error?: string };
+    remote?: { updated: boolean; changed: string[]; error?: string };
   };
-  const langNote = r.lang
-    ? r.lang.error
-      ? `；语言层失败: ${r.lang.error}`
-      : r.lang.updated
-        ? `；语言层已更新 ${r.lang.count} 条`
-        : `；语言层已是最新（${r.lang.count} 条）`
+  const remoteNote = r.remote
+    ? r.remote.error
+      ? `；远程层失败: ${r.remote.error}`
+      : r.remote.updated
+        ? `；远程层已更新（${r.remote.changed.join('/')}）`
+        : '；远程层已是最新'
     : '';
   if (r.error) {
-    $('glossResult').textContent = `失败: ${r.error}${langNote}`;
+    $('glossResult').textContent = `失败: ${r.error}${remoteNote}`;
     $('glossResult').style.color = '#c0392b';
   } else {
     $('glossResult').textContent =
-      (r.updated ? `已更新，当前 ${r.count} 条` : `已是最新（${r.count} 条）`) + langNote;
-    $('glossResult').style.color = '#2a9d5c';
+      (r.updated ? `已更新，当前 ${r.count} 条` : `已是最新（${r.count} 条）`) + remoteNote;
+    $('glossResult').style.color = r.remote?.error ? '#c0392b' : '#2a9d5c';
   }
   void refreshGlossStatus();
 });

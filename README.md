@@ -53,7 +53,7 @@ node tools/test_options.js
 
 ## 术语维护
 
-**自动层不用管**：官方词表、语言文件层都自动更新。手动维护只涉及两个文件：
+**官方词表与语言文件层全自动**（24h 拉取，GitHub 托管仓 + 多镜像）。手动维护涉及两个文件，且**修改后 push 即免发版流转**——扩展后台 24h 内自动拉取全部三个远程层（机制表/语言层/覆盖层），无需发布新扩展版本：
 
 1. **修正已有译名 / 强制保留英文** → `data/manual_overrides.json`（人工覆盖层，优先级最高，可覆盖官方与 retained 锁定）：
    ```json
@@ -63,9 +63,9 @@ node tools/test_options.js
 
 改完必做：
 
-- `const.ts` 里 **bump `PROMPT_VERSION`**——翻译缓存 key 含此版本，不 bump 的话已缓存页面永远显示旧译文；
-- `npm run build` 重构建 + 重载扩展；
-- 提交推送到托管仓库（其他用户通过扩展更新拿到，语言层则由 Actions 自动流转，无需发版）。
+- **先 push 再重载**——运行时以托管仓库为准拉取人工层（未 push 的本地改动会被 24h 检查回退成仓库版本）；
+- `npm run build` 重构建 + 重载扩展（本地立即可见）；
+- **`PROMPT_VERSION` bump 规则**：新翻译立即用新词条；已缓存的旧译文在下次 bump（随重要修订的扩展版本发布时）或用户清缓存时刷新。日常小修不必 bump（避免全量缓存重翻烧 token），重要译名纠错随版本发布 bump 一次。
 
 注意：**不要直接改 `data/lang_terms.json`**（Actions 每日重建会覆盖回去）；语言文件源头译名有误时走 manual_overrides 修正。
 
