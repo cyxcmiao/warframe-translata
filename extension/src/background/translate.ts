@@ -1,7 +1,7 @@
 /**
  * translate.ts — 翻译编排
  *
- * 流程: 缓存 → 词表匹配（词典终局判断，省 token）→ AI 批量请求 + 译后校验 → 回写缓存。
+ * 流程: 缓存 → 词表匹配（词典终局判断，省 token）→ AI 批量请求（并发池）+ 译后校验 → 回写缓存。
  * 词表译名最高优先级: AI 译文里若残留英文术语，强制替换为官方译名。
  * 未配置 API Key: 不做任何翻译（原文直返），由 content 弹提示告知用户。
  * AI 请求失败的块保留原文（不落缓存，修复后重试即可正常翻译），content 据此弹提醒。
@@ -20,6 +20,12 @@ import { glossaryMeta } from './glossary';
 const MAX_BLOCKS_PER_REQ = 16;
 const MAX_CHARS_PER_REQ = 1600;
 const MAX_TERMS_PER_REQ = 60;
+/**
+ * AI 分批的并发数。DeepSeek 官方并发上限为账号级（deepseek-v4-pro 500 起，
+ * api-docs.deepseek.com/quick_start/rate_limit），远高于此值；取小值是为了兼容
+ * 第三方 OpenAI 兼容接口的保守限流。超限 429 由 chatWithRetry 的退避重试兜底。
+ */
+const AI_CONCURRENCY = 6;
 
 interface CacheVal {
   translation: string;
@@ -221,6 +227,12 @@ export async function translateBlocks(blocks: BlockIn[], settings: Settings): Pr
       results[b.id] = { id: b.id, ok: false, error: 'empty' };
       continue;
     }
+    // 纯占位符块（表头/目录项等只含链接的容器）: 原样返回，渲染时用链接译名还原。
+    // 不查缓存不送 AI —— 文本只有 ⟦n⟧ 时词典必然无命中，且不同块的 sha256 相同白占缓存
+    if (!b.text.replace(tokenRegex, '').trim()) {
+      results[b.id] = { id: b.id, ok: true, translation: b.text };
+      continue;
+    }
     const key = await cacheKey(b.text, settings);
     const hit = await getCache(key);
     if (hit) {
@@ -248,9 +260,11 @@ export async function translateBlocks(blocks: BlockIn[], settings: Settings): Pr
 
   const aiCfg: AiConfig = { baseUrl: settings.aiBaseUrl, key: settings.aiKey, model: settings.aiModel };
 
-  // 2. 分批翻译；每批无论成败都保证 resolve（失败块保留原文），避免 inflight 悬挂
+  // 2. 分批翻译（并发池）；每批无论成败都保证 resolve（失败块保留原文），避免 inflight 悬挂。
+  //    批间操作按缓存 key / 块 id 隔离，无共享可变状态（aiFailed/aiError 为简单标志位）
   const jobByKey = new Map(jobs.map(j => [j.key, j]));
-  for (const chunk of chunkBlocks(jobs.map(j => ({ id: j.key, text: j.text })))) {
+  const chunks = chunkBlocks(jobs.map(j => ({ id: j.key, text: j.text })));
+  const runChunk = async (chunk: BlockIn[]): Promise<void> => {
     const inChunk = chunk.map(c => ({ job: jobByKey.get(c.id)! }));
     const matchesMap = new Map(inChunk.map(it => [it.job.key, it.job.matches]));
     const terms = collectTerms(matchesMap);
@@ -300,7 +314,16 @@ export async function translateBlocks(blocks: BlockIn[], settings: Settings): Pr
         results[it.job.id] = { id: it.job.id, ok: true, translation: out.translation, viaAI: out.viaAI };
       }
     }
-  }
+  };
+  // 并发池：worker 共享游标同步取批（取批与自增之间无 await，不会重复/漏批）
+  let nextChunk = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(AI_CONCURRENCY, chunks.length) }, async () => {
+      while (nextChunk < chunks.length) {
+        await runChunk(chunks[nextChunk++]);
+      }
+    }),
+  );
 
   // 3. 等待共享的进行中结果（此时本请求自己的任务已全部落定，不会自等）
   for (const s of shared) {

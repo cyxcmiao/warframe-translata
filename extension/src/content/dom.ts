@@ -43,7 +43,7 @@ const BLOCK_SEL = [
 const SKIP_SEL = [
   'script', 'style', 'pre', 'code', 'kbd', 'samp', 'textarea',
   '.mw-editsection', 'sup.reference', '.mw-references-wrap', '.reference',
-  '#toc', '.toc', '.navbox', '.catlinks', '.printfooter', '.mw-cite-backlink',
+  '.navbox', '.catlinks', '.printfooter', '.mw-cite-backlink',
   '.noprint', '.ambox', '.mbox-small', '.toccolours', '.mw-highlight',
   '#siteNotice', '.page-footer', '.page-header', '.article-footer',
   '.selflink', '.mw-empty-elt', '.navbox-styles', '.module-shortcutboxplain',
@@ -238,12 +238,18 @@ export function collectBlocks(
     for (const [id, ic] of icons) {
       if (!savedIcons.has(id)) savedIcons.set(id, ic);
     }
-    if (text.length < 2 || !/[A-Za-z]/.test(text)) continue;
-    // 跳过 JSON/数据块（模板内嵌数据、Lua 表等）
-    if (/^\s*[\[{]/.test(text) && /":/.test(text)) continue;
-    if (tokenRegex.test(text) && text.replace(tokenRegex, '').trim().length < 2) continue;
+    // 纯占位符块: 容器（表头/目录项等）里只有一个链接、无自属文字。
+    // 不能丢 —— 链接块拿到译名后按 cell 渲染进容器（Rank 这类表头、目录条目）
+    const visible = text.replace(tokenRegex, '').trim();
+    const pureLink = visible.length === 0 && [...links.values()].some(l => /[A-Za-z]/.test(l.text));
+    if (!pureLink) {
+      if (text.length < 2 || !/[A-Za-z]/.test(text)) continue;
+      // 跳过 JSON/数据块（模板内嵌数据、Lua 表等）
+      if (/^\s*[\[{]/.test(text) && /":/.test(text)) continue;
+      if (visible.length < 2) continue;
+    }
 
-    const kind: BlockKind = el.tagName === 'TD' || el.tagName === 'TH' || el.classList.contains('pi-data-value')
+    const kind: BlockKind = pureLink || el.tagName === 'TD' || el.tagName === 'TH' || el.classList.contains('pi-data-value')
       ? 'cell'
       : 'block';
 

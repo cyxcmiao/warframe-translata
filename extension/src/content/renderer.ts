@@ -82,7 +82,10 @@ function firstBlockChild(el: HTMLElement): Element | null {
 export function insert(div: HTMLElement, rec: RawBlock): void {
   if (!rec.el || !rec.el.isConnected) return;
   if (rec.kind === 'cell') {
-    rec.el.appendChild(div);
+    // 纯链接 li（目录项等）嵌套子列表时，译文须插在自身文字之后、子列表之前
+    const nested = rec.el.tagName === 'LI' ? firstBlockChild(rec.el) : null;
+    if (nested) nested.insertAdjacentElement('beforebegin', div);
+    else rec.el.appendChild(div);
   } else {
     const prev = lastNode.get(rec.el);
     if (prev && prev.isConnected) {

@@ -2,13 +2,15 @@
  * test_incremental.js — 增量翻译测试（模拟评论懒加载注入）
  * 验证：
  *  1. 首屏翻译正常
- *  2. 之后注入的 .comment-body（Yappin 评论）被自动增量翻译
+ *  2. 之后注入的 .comment-body（Yappin 评论）被自动增量翻译（词典命中与未命中都出译文）
  *  3. 普通无选择器 div 不会被误翻
  *  4. 重复触发翻译不产生重复译文块（doneEls + 缓存）
  */
 'use strict';
 const path = require('path');
+const fs = require('fs');
 const { chromium } = require('playwright-core');
+const { startMockAI, injectAISettings } = require('./mock_ai');
 
 const ROOT = path.join(__dirname, '..');
 const DIST = path.join(ROOT, 'dist', 'chrome');
@@ -19,7 +21,11 @@ const FIXTURE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><tit
 </div></div></body></html>`;
 
 (async () => {
-  const ctx = await chromium.launchPersistentContext(path.join(__dirname, '.tmp', 'profile-incr'), {
+  // 持久 profile 会残留陈旧的 SW 注册状态与 AI 设置，每次清空并注入 mock 保证确定性
+  const profile = path.join(__dirname, '.tmp', 'profile-incr');
+  try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* 占用则忽略 */ }
+  const server = await startMockAI(8809);
+  const ctx = await chromium.launchPersistentContext(profile, {
     headless: false,
     args: [
       `--disable-extensions-except=${DIST}`,
@@ -28,6 +34,13 @@ const FIXTURE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><tit
       '--no-default-browser-check',
     ],
   });
+  let sw = null;
+  for (let i = 0; i < 40 && !sw; i++) {
+    await new Promise(r => setTimeout(r, 250));
+    sw = ctx.serviceWorkers().find(s => s.url().includes('background'));
+  }
+  if (!sw) throw new Error('SW not found');
+  await injectAISettings(sw, 8809);
   const page = await ctx.newPage();
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.route('https://wiki.warframe.com/**', route =>
@@ -67,7 +80,7 @@ const FIXTURE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><tit
     return {
       total: trs.length,
       commentTranslated: trs.some(t => t.textContent.includes('猛虎 Prime') && t.textContent.includes('massive')),
-      noMatchCommentSkipped: byText('wow').length === 0,
+      noMatchCommentSkipped: byText('wow').length === 1, // mock AI 下无命中评论也出译文
       plainUntouched: !plainTranslated && !plainAfter,
     };
   });
@@ -86,8 +99,7 @@ const FIXTURE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><tit
     });
   }).catch(() => null);
   void r2;
-  // 直接通过后台触发 translateNow
-  const sw = ctx.serviceWorkers().find(s => s.url().includes('background'));
+  // 直接通过后台触发 translateNow（sw 已在启动时获取）
   await sw.evaluate(async () => {
     const tabs = await new Promise(res => chrome.tabs.query({}, res));
     for (const t of tabs) {
@@ -101,5 +113,6 @@ const FIXTURE = `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><tit
   const pass = first > 0 && r.total > first && r.commentTranslated && r.noMatchCommentSkipped && r.plainUntouched && afterRetrig === r.total;
   console.log(pass ? 'PASS' : 'FAIL');
   await ctx.close();
+  server.close();
   process.exit(pass ? 0 : 1);
 })().catch(e => { console.error('ERR', e); process.exit(1); });
