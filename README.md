@@ -69,6 +69,17 @@ node tools/test_options.js
 
 注意：**不要直接改 `data/lang_terms.json`**（Actions 每日重建会覆盖回去）；语言文件源头译名有误时走 manual_overrides 修正。
 
+### Gitee 主源配置（可选，国内直连首选）
+
+运行时拉取顺序：**Gitee（国内第一跳）→ GitHub raw → jsDelivr 三入口 → statically**。启用 Gitee 主源：
+
+1. 注册 Gitee 并完成实名认证 → 创建**空**仓库 `warframe-translata`（不要初始化 README/任何文件）；
+2. Gitee → 设置 → 私人令牌：生成 token（勾选 projects 读写权限）；
+3. GitHub 仓库 → Settings → Secrets and variables → Actions，添加 `GITEE_USER`（Gitee 用户名）和 `GITEE_TOKEN`（令牌值）；
+4. GitHub Actions 手动触发一次 update-lang-terms → 完整历史强制镜像到 Gitee。
+
+未配置 Secrets 时 workflow 自动跳过镜像步骤，运行时拉取回退 GitHub 系镜像，功能不受影响。**Gitee 仓库是只读镜像**（Actions 强制覆盖），不要在 Gitee 上直接修改内容。manifest 需含 `gitee.com` / `raw.giteeusercontent.com` 域名权限（已加），上架数据披露需列明词表镜像下载源。
+
 ## 安装使用
 
 1. Chrome: 加载 `dist/chrome`（chrome://extensions → 开发者模式 → 加载已解压）；Firefox: `dist/firefox`（about:debugging → 临时载入）。
@@ -81,7 +92,7 @@ node tools/test_options.js
 - [x] Firefox 实测（2026-11-20 通过：web-ext 装载 + 真页面词典模式渲染验证，AMO lint 0 错误）
 - [x] `mechanism_terms.json` 机制术语表（官方导出无词条的 wiki 机制用语 + 游戏语言文件复合词如 桎梏飞掷丸，57 条；zh===en 条目=锁定保留英文；复数由匹配器自动处理，无需单列）
 - [ ] 扩展图标（16/48/128 PNG）
-- [ ] Chrome 商店：隐私政策页面 + 数据披露（页面文本发送至用户自配的第三方 AI 接口；key 仅存本地）
+- [ ] Chrome 商店：隐私政策页面 + 数据披露（页面文本发送至用户自配的第三方 AI 接口，key 仅存本地；词表从 github.com/jsdelivr/gitee.com 镜像下载）
 - [ ] AI 请求频控调优（当前每块 ≤16 段/1600 字符一批，单标签页串行；多标签页无全局并发闸）
 
 ## Firefox 安装说明
