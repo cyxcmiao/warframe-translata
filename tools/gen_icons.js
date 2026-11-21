@@ -2,7 +2,7 @@
  * gen_icons.js — 生成扩展图标（playwright chromium 渲染 SVG → PNG）
  * 用法: node tools/gen_icons.js（npm run icons）
  * 产物: extension/icons/icon{16,32,48,128}.png（打包进扩展）
- *       store/store_logo_300.png（Edge 商店 listing 用，不打进扩展包）
+ *       store/store_logo_300.png（300px logo 物料，不打进扩展包）
  */
 'use strict';
 const fs = require('fs');

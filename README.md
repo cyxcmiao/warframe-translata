@@ -22,9 +22,9 @@
 tools/build_de_map.js    # 拉官方导出生成 data/de_names.json（npm run build:data）
 tools/build_lang_terms.js # 从游戏语言文件挖掘补充词条 data/lang_terms.json（Name 结尾 key，~1.7 万条）
 tools/build_ext.js       # esbuild 构建三端产物 dist/chrome + dist/edge + dist/firefox（npm run build）
-tools/gen_icons.js       # 生成扩展图标 16/32/48/128 + Edge 商店 logo 300（npm run icons，需 Playwright Chromium）
-tools/pack.js            # 三端上架 zip（纯 stdlib 实现 zip 容器，npm run pack；manifest 在 zip 根、正斜杠条目，符合 AMO/Edge 要求）
-tools/test_pack.js       # 上架包结构回归：manifest 根布局 / 无反斜杠条目 / icons 齐全 / 三端 manifest 差异点
+tools/gen_icons.js       # 生成扩展图标 16/32/48/128 + 300px logo（npm run icons，需 Playwright Chromium）
+tools/pack.js            # 三端分发 zip（纯 stdlib 实现 zip 容器，npm run pack；manifest 在 zip 根、正斜杠条目，Firefox 可改名 .xpi 直装）
+tools/test_pack.js       # 分发包结构回归：manifest 根布局 / 无反斜杠条目 / icons 齐全 / 三端 manifest 差异点
 tools/test_matcher.js    # 匹配器单元测试（npm test）
 tools/test_browser.js    # 真浏览器端到端测试（需可访问 fandom，当前环境不可达）
 tools/test_ai.js         # AI 模式端到端测试（本地 mock 接口）
@@ -54,7 +54,7 @@ npm install
 npm run build:data   # 重新生成词表（官方导出 + 语言文件层；tools/cache 有缓存，增量下载）
 npm run build        # 构建扩展（esbuild 不做类型检查，改完源码先跑 typecheck）
 npm run icons        # 重新生成扩展图标（改了 tools/gen_icons.js 的 SVG 设计后）
-npm run pack         # 三端上架/分发 zip → dist/pack/（打 v* tag 时 CI 自动构建并发布 Release）
+npm run pack         # 三端分发 zip → dist/pack/（打 v* tag 时 CI 自动构建并发布 Release）
 node tools/test_pack.js  # 上架包结构回归
 npm run typecheck    # TypeScript 类型检查（extension/src 全量）
 npm test             # 匹配器单元测试
@@ -93,21 +93,23 @@ node tools/test_options.js
 3. GitHub 仓库 → Settings → Secrets and variables → Actions，添加 `GITEE_USER`（Gitee 用户名）和 `GITEE_TOKEN`（令牌值）；
 4. GitHub Actions 手动触发一次 update-lang-terms → 完整历史强制镜像到 Gitee。
 
-未配置 Secrets 时 workflow 自动跳过镜像步骤，运行时拉取回退 GitHub 系镜像，功能不受影响。**Gitee 仓库是只读镜像**（Actions 强制覆盖），不要在 Gitee 上直接修改内容。manifest 需含 `gitee.com` / `raw.giteeusercontent.com` 域名权限（已加），上架数据披露需列明词表镜像下载源。
+未配置 Secrets 时 workflow 自动跳过镜像步骤，运行时拉取回退 GitHub 系镜像，功能不受影响。**Gitee 仓库是只读镜像**（Actions 强制覆盖），不要在 Gitee 上直接修改内容。manifest 需含 `gitee.com` / `raw.giteeusercontent.com` 域名权限（已加），词表镜像下载源已列入隐私政策的数据流向说明（store/privacy-policy.md）。
 
 ## 安装使用
 
-### Chrome / Edge（GitHub Release 分发，不走商店）
+### Chrome / Edge
 
 1. 到本仓库 [Releases](../../releases) 下载最新 `translatawiki-chrome-v*.zip`（Edge 同用此包）并**解压**；
 2. 打开 `chrome://extensions`（Edge 为 `edge://extensions`）→ 开启「开发者模式」→「加载已解压的扩展程序」→ 选解压出的目录；
-3. 每次启动浏览器可能提示「停用开发者模式扩展」，选保留即可——未签名扩展在 Windows 下浏览器无商店安装途径，此提示属正常现象。
+3. 每次启动浏览器可能提示「停用开发者模式扩展」，选保留即可——未签名扩展无商店安装途径，此提示属正常现象。
 
 ### Firefox
 
-- 开发预览：`npx web-ext run --source-dir dist/firefox`（临时加载，文件变化自动重载）
-- 手动临时加载：about:debugging → 此 Firefox → 临时载入附加组件 → 选 `dist/firefox/manifest.json`（重启 Firefox 失效）
-- 正式版 Firefox 不允许未签名扩展常驻；自用长期方案是 Firefox Developer Edition / Nightly（`xpinstall.signatures.required=false`）或 AMO 签名（见 [store/listing-amo.md](store/listing-amo.md)）
+1. 到本仓库 [Releases](../../releases) 下载最新 `translatawiki-firefox-v*.zip`；
+2. **正式版 Firefox 不允许未签名扩展常驻**，按你的用法二选一：
+   - **Firefox Developer Edition / Nightly（长期使用）**：把 zip 的 `.zip` 后缀改成 `.xpi` → 地址栏 `about:addons` → 右上角齿轮「从文件安装附加组件」→ 选该 .xpi（需先在 `about:config` 把 `xpinstall.signatures.required` 设为 false）；
+   - **临时加载（任何 Firefox，重启浏览器后失效）**：解压 zip → `about:debugging` → 此 Firefox → 「临时载入附加组件」→ 选解压出的 `manifest.json`；
+3. 开发预览：`npx web-ext run --source-dir dist/firefox`（临时加载，文件变化自动重载）。
 
 ### 使用
 
@@ -116,24 +118,17 @@ node tools/test_options.js
 3. 在 options 页填 OpenAI 兼容接口（Base URL + Key + 模型名），首次需点"授权接口域名"；填好后立即生效。
 4. **搜索框中文术语**（默认开，不依赖 AI Key）：在 wiki 搜索框直接输入词表里的官方中文译名——下拉顶部出现词表候选（蓝左条 + 「词表 · 英文名」，同名多译名如 电击 → Electricity/Shock 全部列出），**点候选直接跳转**（改写为英文后走站点原生 Go 搜索，精确命中页面即直接进页；Ctrl/中键新标签打开），回车/搜索按钮提交时完整中文术语也会自动改写为英文（toast 提示映射，纯前缀歧义如「电」不改写放行）。站点自己的中文重定向候选保持原样，设置页可关。
 
-## 发布渠道（三端）
+## 分发（三端统一 GitHub Release）
 
-| 端 | 渠道 | 包 | 材料 |
-| --- | --- | --- | --- |
-| Chrome | **GitHub Release**（不打开发者账号，用户自行下载加载） | `dist/pack/translatawiki-chrome-v*.zip` | Release 说明（workflow 自动生成） |
-| Edge | Edge Add-ons 商店（Partner Center） | `translatawiki-edge-v*.zip` | [store/listing-edge.md](store/listing-edge.md)（含数据披露表单答案 + 300×300 logo） |
-| Firefox | AMO（listed 或 unlisted 自签） | `translatawiki-firefox-v*.zip` | [store/listing-amo.md](store/listing-amo.md)（含数据申报表单答案） |
+三端都不进商店：Chrome/Edge 加载已解压目录，Firefox 用 Developer Edition 装 .xpi 或临时加载（见「安装使用」）。数据流向说明（隐私政策）：`https://github.com/cyxcmiao/warframe-translata/blob/main/store/privacy-policy.md`。
 
-隐私政策（Edge/AMO 必填 URL）：`https://github.com/cyxcmiao/warframe-translata/blob/main/store/privacy-policy.md`。
+发版流程：bump `package.json` version → `git tag vX.Y.Z` → push tag → CI 自动 build + pack + 结构校验 + 发布 Release，附三端 zip（[.github/workflows/release.yml](.github/workflows/release.yml)）。
 
-发版流程：bump `package.json` version → `git tag vX.Y.Z` → push tag → CI 自动 build + pack + 结构校验 + 发布 Release（[.github/workflows/release.yml](.github/workflows/release.yml)）。
-
-## 上架前待办
+## 发布待办
 
 - [x] Firefox 实测（2026-11-20 通过：web-ext 装载 + 真页面词典模式渲染验证，AMO lint 0 错误）
 - [x] `mechanism_terms.json` 机制术语表（官方导出无词条的 wiki 机制用语 + 游戏语言文件复合词如 桎梏飞掷丸，57 条；zh===en 条目=锁定保留英文；复数由匹配器自动处理，无需单列）
-- [x] 扩展图标 16/32/48/128 + Edge 商店 logo 300（`npm run icons` 生成，三 manifest 已挂）
-- [x] 三端上架包 + 结构校验（npm run pack + tools/test_pack.js；AMO 硬性要求 manifest 在 zip 根 + 正斜杠条目已满足）
-- [ ] Edge Partner Center / AMO 实际提交（文案与表单答案已备好：store/listing-edge.md、store/listing-amo.md；隐私政策 URL 已定于仓库 store/privacy-policy.md）
-- [ ] 商店截图（手动截：双语对照页面 + 搜索框中文候选，1280×800）
+- [x] 扩展图标 16/32/48/128（`npm run icons` 生成，三 manifest 已挂）
+- [x] 三端分发包 + 结构校验（npm run pack + tools/test_pack.js；manifest 在 zip 根 + 正斜杠条目，AMO lint 兼容）
+- [ ] 首个 Release：`git tag v0.1.0 && git push origin v0.1.0`（tag 与 package.json 版本一致由 CI 校验）
 - [ ] AI 请求频控调优（当前每块 ≤16 段/1600 字符一批，单标签页串行；多标签页无全局并发闸）

@@ -1,6 +1,6 @@
 # 打 v* tag 时构建三端扩展包并发布 GitHub Release。
-# Chrome 渠道不走商店：用户从 Release 下载 chrome zip 加载已解压（README「Chrome 安装」）。
-# edge / firefox zip 同时产出，供 Edge Partner Center 与 AMO 提交（store/listing-*.md）。
+# 三端统一 GitHub 分发、不进商店：Chrome/Edge 下载 zip 加载已解压，Firefox 改名 .xpi
+# 用 Developer Edition 安装或临时加载（README「安装使用」）。
 name: release
 
 on:
@@ -43,8 +43,7 @@ jobs:
         with:
           files: dist/pack/*.zip
           body: |
-            三端扩展包，见 README「安装使用」。
+            三端扩展包（统一 GitHub 分发，不进商店），安装步骤见 README「安装使用」。
 
-            - **Chrome**: 下载 `translatawiki-chrome-*.zip` 解压 → chrome://extensions 开发者模式 → 加载已解压的 `dist/chrome` 目录
-            - **Edge**: 提交 Edge Add-ons 商店的包（当前请同 Chrome 方式在 edge://extensions 加载）
-            - **Firefox**: 提交 AMO 的包 / Developer Edition 临时载入
+            - **Chrome / Edge**: 下载 `translatawiki-chrome-*.zip` 解压 → chrome://extensions（Edge: edge://extensions）→ 开发者模式 → 加载已解压的目录
+            - **Firefox**: 下载 `translatawiki-firefox-*.zip` → 后缀改 `.xpi` → Developer Edition/Nightly（xpinstall.signatures.required=false）从文件安装；或解压后 about:debugging 临时载入 manifest.json（重启失效）
