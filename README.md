@@ -55,9 +55,9 @@ node tools/test_options.js
 
 **官方词表与语言文件层全自动**（24h 拉取，GitHub 托管仓 + 多镜像）。手动维护涉及两个文件，且**修改后 push 即免发版流转**——扩展后台 24h 内自动拉取全部三个远程层（机制表/语言层/覆盖层），无需发布新扩展版本：
 
-1. **修正已有译名 / 强制保留英文** → `data/manual_overrides.json`（人工覆盖层，优先级最高，可覆盖官方与 retained 锁定）：
+1. **修正已有译名 / 强制保留英文 / 删除词条** → `data/manual_overrides.json`（人工覆盖层，优先级最高，可覆盖官方与 retained 锁定；值补映射、`zh===en` 锁保留英文、**空串 `""` = 从生效词表删除该词条**——人工裁决不收录的争议词不强制译名，交 AI 语境兜底）：
    ```json
-   { "Flechette Orb": "飞掷丸", "Excalibur Umbra": "Excalibur Umbra" }
+   { "Flechette Orb": "飞掷丸", "Excalibur Umbra": "Excalibur Umbra", "NAME": "" }
    ```
 2. **新增 wiki 用语** → `data/mechanism_terms.json`（机制术语表；`zh===en` = 锁定保留英文）
 

@@ -264,7 +264,9 @@ export async function updateRemoteLayers(force = false): Promise<RemoteLayersRes
  *  - 官方已有译名的条目以官方为准（后展开覆盖）；
  *  - 官方保留英文名（retained，如 Excalibur）即使各补充层里有也删掉，照抄英文才是正确译法；
  *  - 人工覆盖层最后展开：明确的人工意图可覆盖包括官方与 retained 锁定在内的一切
- *    （修正官方过时/错误译名，或 zh===en 强制保留英文）。
+ *    （修正官方过时/错误译名，或 zh===en 强制保留英文）；
+ *  - 人工覆盖层 zh 为空串 = 删除词条：人工裁决不收录的争议词不强制译名，交 AI 语境兜底。
+ *    空值在任何层都无意义，合并后统一剔除。
  */
 function mergeGlossaryLayers(official: Record<string, string>, retained: string[]): Record<string, string> {
   const out = { ...mechTerms(), ...langTerms() };
@@ -272,7 +274,11 @@ function mergeGlossaryLayers(official: Record<string, string>, retained: string[
   for (const en of Object.keys(out)) {
     if (retainedSet.has(en.toLowerCase())) delete out[en];
   }
-  return { ...out, ...official, ...manualOverrides() };
+  const merged = { ...out, ...official, ...manualOverrides() };
+  for (const en of Object.keys(merged)) {
+    if (!merged[en]) delete merged[en];
+  }
+  return merged;
 }
 
 function installRecord(rec: GlossaryRecord): void {
