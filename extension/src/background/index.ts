@@ -3,6 +3,7 @@ import { ensureGlossary, glossaryMeta, updateGlossary, updateLangTerms, UpdateRe
 import { translateBlocks, aiTest, cacheStats, cacheClear } from './translate';
 import { getSettings } from './settings';
 import { api } from '../shared/api';
+import type { Settings } from '../shared/types';
 
 async function scheduleGlossaryCheck() {
   const s = await getSettings();
@@ -51,7 +52,9 @@ api.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
       case 'bootstrap': {
         await ensureGlossary();
         const settings = await getSettings();
-        sendResponse({ settings, glossary: glossaryMeta(), ready: true });
+        // 不把明文 aiKey 发给 content script（隔离世界仍属不必要暴露面），只给布尔位
+        const safe: Settings = { ...settings, aiKey: '', hasKey: !!settings.aiKey };
+        sendResponse({ settings: safe, glossary: glossaryMeta(), ready: true });
         break;
       }
       case 'translate': {

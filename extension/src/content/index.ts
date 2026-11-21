@@ -51,7 +51,7 @@ const AI_ERR_MSG: Record<string, string> = {
 
 function statusText(): string {
   if (!enabled) return '停';
-  if (!settings.aiKey) return '未启用';
+  if (!settings.hasKey) return '未启用';
   return '译·AI';
 }
 
@@ -215,7 +215,7 @@ function collectAndEnqueue(): void {
 }
 
 async function startSession(): Promise<void> {
-  if (!settings.aiKey) {
+  if (!settings.hasKey) {
     showToast('未配置 API Key，翻译未启用（请在扩展设置中填写）');
     return;
   }
@@ -348,8 +348,8 @@ function watchMutations(): void {
 
 /** 悬浮开关（Shadow DOM 隔离样式） */
 function fabTitle(): string {
-  const keyHint = settings.aiKey ? '' : '未配置 API Key，点击前往设置；';
-  const sc = settings.aiKey && settings.toggleShortcut ? `，${settings.toggleShortcut} 切换译文` : '';
+  const keyHint = settings.hasKey ? '' : '未配置 API Key，点击前往设置；';
+  const sc = settings.hasKey && settings.toggleShortcut ? `，${settings.toggleShortcut} 切换译文` : '';
   return `Warframe Wiki 精准翻译（${keyHint}点击 开/关${sc}）`;
 }
 
@@ -374,7 +374,7 @@ function setupFab(): void {
   btn.title = fabTitle();
   btn.addEventListener('click', async () => {
     // 未配置 Key：引导去设置页（不改变站点开关，避免之后配好 Key 反而被"停用"）
-    if (!settings.aiKey) {
+    if (!settings.hasKey) {
       showToast('未配置 API Key，正在打开设置…', { duration: 2500 });
       api.runtime.sendMessage({ type: 'openOptions' }).catch(() => {});
       return;
@@ -396,13 +396,15 @@ function watchStorage(): void {
     if (area !== 'local') return;
     if (changes.settings) {
       const prev = settings;
-      settings = { ...DEFAULT_SETTINGS, ...(changes.settings.newValue as Partial<Settings>) };
+      const raw = changes.settings.newValue as Partial<Settings>;
+      // 脱敏：content 上下文不持有明文 aiKey，只留布尔位
+      settings = { ...DEFAULT_SETTINGS, ...raw, aiKey: '', hasKey: !!raw.aiKey };
       applyStyle();
       fab?.update(statusText());
       fab?.retitle();
       // API Key 增删: 立即开/停整页翻译（配置即时生效）
-      if (!!settings.aiKey !== !!prev.aiKey) {
-        if (settings.aiKey) {
+      if (!!settings.hasKey !== !!prev.hasKey) {
+        if (settings.hasKey) {
           if (enabled && settings.autoTranslate) startSession();
         } else {
           stopSession();

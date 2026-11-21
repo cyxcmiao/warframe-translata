@@ -10,6 +10,9 @@ export interface Settings {
   color: string; // 译文主色
   toggleShortcut: string; // 切换 译文/隐藏 的快捷键（"Ctrl+Alt+D"，空串 = 禁用）
   glossaryCheckHours: number; // 词表更新检查间隔
+  /** 仅存在于派生副本（发给 content script 的 settings）：真实 key 是否已配置。
+   *  storage 与 options 页持有的 aiKey 不进此字段——content 上下文只拿布尔位，不持明文。 */
+  hasKey?: boolean;
 }
 
 export interface GlossaryMeta {
