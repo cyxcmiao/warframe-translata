@@ -45,6 +45,10 @@ Manifest 已满足 AMO 2025-11 起的硬性要求:
 
 （manifest 的 `data_collection_permissions` 与此表单必须一致。）
 
+## 源码审查备注
+
+dist 包内 JS 由 esbuild 打包压缩（构建产物），AMO 审核对 minified 代码可能发起源码请求——扩展源码公开在同仓库（`extension/src/`，构建脚本 `tools/build_ext.js`），上传时或收到审核请求时直接给仓库链接即可，无需额外准备。
+
 ## 版本纪律
 
 - bump `package.json` version → tag `v*` → CI 产 zip → AMO 上传新版本；
