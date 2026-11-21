@@ -8,7 +8,7 @@
  */
 import { idbOpen, idbGet, idbPut } from '../shared/idb';
 import { TermMatcher } from '../shared/matcher';
-import { LANG_TERMS_REPO } from '../shared/const';
+import { GITEE_REPO, LANG_TERMS_REPO } from '../shared/const';
 import type { GlossaryMeta, TermEntry } from '../shared/types';
 import { todayStr, sha256hex } from '../shared/util';
 import { EXPORT_BASES, fetchIndex, fetchExport, rebuildTerms } from './exporter';
@@ -115,13 +115,22 @@ const LAYERS: LayerSpec[] = [
   { id: 'manualOverrides', file: 'data/manual_overrides.json', max: 5000 },
 ];
 
-const MIRROR_URLS = (repo: string, file: string): string[] => [
-  `https://raw.githubusercontent.com/${repo}/main/${file}`,
-  `https://cdn.jsdelivr.net/gh/${repo}@main/${file}`,
-  `https://fastly.jsdelivr.net/gh/${repo}@main/${file}`,
-  `https://gcore.jsdelivr.net/gh/${repo}@main/${file}`,
-  `https://cdn.statically.io/gh/${repo}/main/${file}`,
-];
+/** 拉取镜像序：Gitee 主源（国内第一跳）→ GitHub raw → jsDelivr 三入口 → statically。
+ *  Gitee 仓库由 Actions 从 GitHub 强制镜像（push/schedule 触发），置空串则跳过。 */
+const MIRROR_URLS = (repo: string, file: string): string[] => {
+  const urls: string[] = [];
+  if (GITEE_REPO) {
+    urls.push(`https://gitee.com/${GITEE_REPO}/raw/main/${file}`);
+  }
+  urls.push(
+    `https://raw.githubusercontent.com/${repo}/main/${file}`,
+    `https://cdn.jsdelivr.net/gh/${repo}@main/${file}`,
+    `https://fastly.jsdelivr.net/gh/${repo}@main/${file}`,
+    `https://gcore.jsdelivr.net/gh/${repo}@main/${file}`,
+    `https://cdn.statically.io/gh/${repo}/main/${file}`,
+  );
+  return urls;
+};
 
 /** 读扩展内置的层文件：lang_terms.json 是 {terms:{...}}，mech/overrides 是平面对象 */
 async function loadBundledLayer(file: string): Promise<{ terms: Record<string, string>; sha: string }> {

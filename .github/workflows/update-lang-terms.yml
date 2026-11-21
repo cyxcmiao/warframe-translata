@@ -7,6 +7,9 @@ on:
   schedule:
     - cron: '17 21 * * *' # UTC 21:17 ≈ 北京 05:17，避开 DE 更新高峰
   workflow_dispatch: {} # 手动触发（设置页"检查词表更新"调试用）
+  push:
+    branches: [main]
+    paths: ['data/**'] # 人工层/词表变更 → 立即镜像到 Gitee
 
 permissions:
   contents: write
@@ -20,6 +23,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Gitee 镜像 push 需要完整历史
 
       - uses: actions/setup-node@v4
         with:
@@ -40,3 +45,14 @@ jobs:
           else
             echo "lang_terms.json unchanged, skip commit"
           fi
+
+      # 强制镜像 main 到 Gitee（国内主源）。需在 GitHub Secrets 配置
+      # GITEE_USER / GITEE_TOKEN（Gitee 个人访问令牌，repo 读写权限）；
+      # 未配置时跳过——运行时拉取会自动回退 GitHub 系镜像。
+      - name: mirror to gitee
+        env:
+          GITEE_USER: ${{ secrets.GITEE_USER }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        if: env.GITEE_USER != '' && env.GITEE_TOKEN != ''
+        run: |
+          git push --force "https://${GITEE_USER}:${GITEE_TOKEN}@gitee.com/cyxcmiao/warframe-translata.git" main

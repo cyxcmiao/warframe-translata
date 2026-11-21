@@ -13,10 +13,17 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 /**
- * 语言文件层词条的托管仓库（GitHub Actions 每日重建 data/lang_terms.json 并提交，
+ * 词条托管仓库（GitHub Actions 每日重建 data/lang_terms.json 并提交，
  * 扩展后台按文件内容 sha 增量拉取）。仓库必须为 public（raw/jsDelivr 匿名拉取依赖）。
  */
 export const LANG_TERMS_REPO = 'cyxcmiao/warframe-translata';
+
+/**
+ * Gitee 镜像仓库（主源，国内第一跳）：同名仓库由 Actions 自动从 GitHub 强制镜像，
+ * 拉取顺序 Gitee → GitHub 系。需在 Gitee 建同名空仓库 + GitHub Secrets 配
+ * GITEE_USER/GITEE_TOKEN（见 README「术语维护」）；置空串则跳过 Gitee 源。
+ */
+export const GITEE_REPO = 'cyxcmiao/warframe-translata';
 
 export const STORAGE_KEYS = {
   settings: 'settings',

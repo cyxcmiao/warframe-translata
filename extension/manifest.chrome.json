@@ -6,11 +6,19 @@
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
-  "permissions": ["storage", "unlimitedStorage", "alarms"],
-  "optional_host_permissions": ["https://*/*"],
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "alarms"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "host_permissions": [
     "https://content.warframe.com/*",
-    "https://origin.warframe.com/*"
+    "https://origin.warframe.com/*",
+    "https://gitee.com/*",
+    "https://raw.giteeusercontent.com/*"
   ],
   "background": {
     "service_worker": "background/background.js"
@@ -20,8 +28,12 @@
       "matches": [
         "https://wiki.warframe.com/*"
       ],
-      "js": ["content/content.js"],
-      "css": ["content/content.css"],
+      "js": [
+        "content/content.js"
+      ],
+      "css": [
+        "content/content.css"
+      ],
       "run_at": "document_idle"
     }
   ],

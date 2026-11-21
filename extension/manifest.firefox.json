@@ -7,29 +7,45 @@
       "id": "translatawiki@warframe-helper.dev",
       "strict_min_version": "140.0",
       "data_collection_permissions": {
-        "required": ["websiteContent"]
+        "required": [
+          "websiteContent"
+        ]
       }
     }
   },
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   },
-  "permissions": ["storage", "unlimitedStorage", "alarms"],
-  "optional_host_permissions": ["https://*/*"],
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "alarms"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "host_permissions": [
     "https://content.warframe.com/*",
-    "https://origin.warframe.com/*"
+    "https://origin.warframe.com/*",
+    "https://gitee.com/*",
+    "https://raw.giteeusercontent.com/*"
   ],
   "background": {
-    "scripts": ["background/background.js"]
+    "scripts": [
+      "background/background.js"
+    ]
   },
   "content_scripts": [
     {
       "matches": [
         "https://wiki.warframe.com/*"
       ],
-      "js": ["content/content.js"],
-      "css": ["content/content.css"],
+      "js": [
+        "content/content.js"
+      ],
+      "css": [
+        "content/content.css"
+      ],
       "run_at": "document_idle"
     }
   ],
