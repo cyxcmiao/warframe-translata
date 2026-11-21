@@ -115,20 +115,19 @@ const LAYERS: LayerSpec[] = [
   { id: 'manualOverrides', file: 'data/manual_overrides.json', max: 5000 },
 ];
 
-/** 拉取镜像序：Gitee（国内第一跳，主源）→ GitHub raw → jsDelivr 三入口 → statically（备份）。
- *  Gitee 仓库由 Actions 从 GitHub 强制镜像（push/schedule 触发），置空串则跳过。 */
+/** 拉取镜像序：GitHub raw → jsDelivr 三入口 → statically → Gitee（兜底，Secrets 配置后由 Actions 自动镜像）。
+ *  Gitee 仓库置空串则跳过。 */
 const MIRROR_URLS = (repo: string, file: string): string[] => {
-  const urls: string[] = [];
-  if (GITEE_REPO) {
-    urls.push(`https://gitee.com/${GITEE_REPO}/raw/main/${file}`);
-  }
-  urls.push(
+  const urls: string[] = [
     `https://raw.githubusercontent.com/${repo}/main/${file}`,
     `https://cdn.jsdelivr.net/gh/${repo}@main/${file}`,
     `https://fastly.jsdelivr.net/gh/${repo}@main/${file}`,
     `https://gcore.jsdelivr.net/gh/${repo}@main/${file}`,
     `https://cdn.statically.io/gh/${repo}/main/${file}`,
-  );
+  ];
+  if (GITEE_REPO) {
+    urls.push(`https://gitee.com/${GITEE_REPO}/raw/main/${file}`);
+  }
   return urls;
 };
 

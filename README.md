@@ -69,9 +69,9 @@ node tools/test_options.js
 
 注意：**不要直接改 `data/lang_terms.json`**（Actions 每日重建会覆盖回去）；语言文件源头译名有误时走 manual_overrides 修正。
 
-### Gitee 主源配置（可选，国内直连首选）
+### Gitee 兜底源配置（可选，GitHub/jsDelivr 全不可达时的国内直连备份）
 
-运行时拉取顺序：**Gitee（国内第一跳）→ GitHub raw → jsDelivr 三入口 → statically**。启用 Gitee 主源：
+运行时拉取顺序：**GitHub raw → jsDelivr 三入口 → statically → Gitee（兜底）**。启用 Gitee 兜底源：
 
 1. 注册 Gitee 并完成实名认证 → 创建**空**仓库 `warframe-translata`（不要初始化 README/任何文件）；
 2. Gitee → 设置 → 私人令牌：生成 token（勾选 projects 读写权限）；
