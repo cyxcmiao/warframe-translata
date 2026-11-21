@@ -10,7 +10,7 @@ import { idbOpen, idbGet, idbPut } from '../shared/idb';
 import { TermMatcher } from '../shared/matcher';
 import { GITEE_REPO, LANG_TERMS_REPO } from '../shared/const';
 import type { GlossaryMeta, TermEntry } from '../shared/types';
-import { todayStr, sha256hex } from '../shared/util';
+import { todayStr, sha256hex, b64ToUtf8 } from '../shared/util';
 import { EXPORT_BASES, fetchIndex, fetchExport, rebuildTerms } from './exporter';
 
 const DB_NAME = 'tw';
@@ -115,20 +115,26 @@ const LAYERS: LayerSpec[] = [
   { id: 'manualOverrides', file: 'data/manual_overrides.json', max: 5000 },
 ];
 
-/** 拉取镜像序：GitHub raw → jsDelivr 三入口 → statically → Gitee（兜底，Secrets 配置后由 Actions 自动镜像）。
- *  Gitee 仓库置空串则跳过。 */
-const MIRROR_URLS = (repo: string, file: string): string[] => {
-  const urls: string[] = [
-    `https://raw.githubusercontent.com/${repo}/main/${file}`,
-    `https://cdn.jsdelivr.net/gh/${repo}@main/${file}`,
-    `https://fastly.jsdelivr.net/gh/${repo}@main/${file}`,
-    `https://gcore.jsdelivr.net/gh/${repo}@main/${file}`,
-    `https://cdn.statically.io/gh/${repo}/main/${file}`,
+/** 拉取镜像序：GitHub raw → jsDelivr 三入口 → statically → Gitee API（兜底，Secrets 配置后由 Actions 自动镜像）。
+ *  Gitee 用 API v5 contents 端点而非 raw——raw 对未通过开源审核的仓库返回 451，API 匿名 GET
+ *  稳定可用（响应为 {content: base64}，解码后才是文件原文）。Gitee 仓库置空串则跳过。 */
+interface MirrorSource {
+  url: string;
+  giteeApi?: boolean;
+}
+
+const MIRROR_SOURCES = (repo: string, file: string): MirrorSource[] => {
+  const list: MirrorSource[] = [
+    { url: `https://raw.githubusercontent.com/${repo}/main/${file}` },
+    { url: `https://cdn.jsdelivr.net/gh/${repo}@main/${file}` },
+    { url: `https://fastly.jsdelivr.net/gh/${repo}@main/${file}` },
+    { url: `https://gcore.jsdelivr.net/gh/${repo}@main/${file}` },
+    { url: `https://cdn.statically.io/gh/${repo}/main/${file}` },
   ];
   if (GITEE_REPO) {
-    urls.push(`https://gitee.com/${GITEE_REPO}/raw/main/${file}`);
+    list.push({ url: `https://gitee.com/api/v5/repos/${GITEE_REPO}/contents/${file}?ref=main`, giteeApi: true });
   }
-  return urls;
+  return list;
 };
 
 /** 读扩展内置的层文件：lang_terms.json 是 {terms:{...}}，mech/overrides 是平面对象 */
@@ -194,11 +200,19 @@ export async function updateRemoteLayers(force = false): Promise<RemoteLayersRes
   for (const spec of LAYERS) {
     let text: string | null = null;
     let lastErr: unknown = null;
-    for (const u of MIRROR_URLS(LANG_TERMS_REPO, spec.file)) {
+    for (const src of MIRROR_SOURCES(LANG_TERMS_REPO, spec.file)) {
       try {
-        const res = await fetch(u, { signal: AbortSignal.timeout(15000), cache: 'no-store' });
+        const res = await fetch(src.url, { signal: AbortSignal.timeout(15000), cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        text = await res.text();
+        let body = await res.text();
+        if (src.giteeApi) {
+          // Gitee contents API：{content: base64} → 解码为文件原文（sha 基准与直链拉取一致）
+          const api = JSON.parse(body) as { content?: string };
+          if (typeof api.content !== 'string') throw new Error('API 响应缺少 content');
+          body = b64ToUtf8(api.content);
+        }
+        JSON.parse(body); // 预校验：坏内容不进入 sha 基准
+        text = body;
         break;
       } catch (e) {
         lastErr = e;

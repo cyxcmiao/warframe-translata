@@ -16,3 +16,10 @@ export function nowIso(): string {
 export function todayStr(): string {
   return new Date().toISOString().slice(0, 10);
 }
+
+/** base64 → UTF-8 文本（Gitee contents API 返回的文件内容用此解码；兼容带换行的 base64） */
+export function b64ToUtf8(b64: string): string {
+  const bin = atob(b64.replace(/\s/g, ''));
+  const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}

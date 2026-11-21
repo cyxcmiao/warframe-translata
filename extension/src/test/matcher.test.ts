@@ -1,5 +1,6 @@
 /** 匹配器单元测试: node tools/test_matcher.js */
 import { TermMatcher, buildTranslation } from '../shared/matcher';
+import { b64ToUtf8 } from '../shared/util';
 import type { TermEntry } from '../shared/types';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -112,6 +113,14 @@ const m = new TermMatcher(entries);
   // 单独的 Flechette（非复合词语境）仍应命中官方词表条目
   const ms = m.match('Flechette rivens are popular.');
   check('单独 Flechette → 箭型弹头', ms.some(x => x.en === 'Flechette' && x.zh === '箭型弹头'), ms);
+}
+// --- base64 解码（Gitee contents API 拉取路径）
+{
+  const b64 = Buffer.from('{"terms":{"Tigris Prime":"猛虎 Prime"}}', 'utf8').toString('base64');
+  const text = b64ToUtf8(b64);
+  const parsed = JSON.parse(text) as { terms: Record<string, string> };
+  check('b64ToUtf8 中文 UTF-8 解码', parsed.terms['Tigris Prime'] === '猛虎 Prime', text);
+  check('b64ToUtf8 兼容带换行 base64', b64ToUtf8(b64.replace(/(.{10})/g, '$1\n')) === text);
 }
 // --- 语言文件挖掘层: 官方导出没有的词条（build_lang_terms.js 产出）
 {
