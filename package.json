@@ -8,7 +8,7 @@
     "build": "node tools/build_ext.js",
     "build:data": "node tools/build_de_map.js && node tools/build_lang_terms.js",
     "typecheck": "tsc -p extension/src/test/tsconfig.json",
-    "test": "node tools/test_matcher.js"
+    "test": "node tools/test_matcher.js && node tools/test_sweep.js"
   },
   "dependencies": {
     "lzma": "^2.3.2",

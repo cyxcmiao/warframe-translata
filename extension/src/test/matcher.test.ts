@@ -29,6 +29,10 @@ for (const [en, zh] of Object.entries(lang.terms)) {
 }
 for (const [en, zh] of Object.entries(data.terms as Record<string, string>)) merged[en] = zh;
 for (const [en, zh] of Object.entries(overrides)) merged[en] = zh;
+// 与运行时 mergeGlossaryLayers 一致：覆盖层空串 = 删除词条，合并后统一剔除空值
+for (const en of Object.keys(merged)) {
+  if (!merged[en]) delete merged[en];
+}
 const entries: TermEntry[] = Object.entries(merged).map(([en, zh]) => ({ en, zh }));
 console.log(`glossary: ${entries.length} terms (official v${data.version} + mech ${Object.keys(mech).length} + lang ${Object.keys(lang.terms).length} + overrides ${Object.keys(overrides).length})`);
 const m = new TermMatcher(entries);

@@ -1,6 +1,6 @@
 /** background 入口 — 消息路由 / 词表定时更新 */
 import { ensureGlossary, glossaryMeta, updateGlossary, updateRemoteLayers, UpdateResult } from './glossary';
-import { translateBlocks, aiTest, cacheStats, cacheClear } from './translate';
+import { translateBlocks, aiTest, cacheStats, cacheClear, invalidateStaleCache } from './translate';
 import { getSettings } from './settings';
 import { api } from '../shared/api';
 import type { Settings } from '../shared/types';
@@ -11,6 +11,20 @@ async function scheduleGlossaryCheck() {
     periodInMinutes: Math.max(60, s.glossaryCheckHours * 60),
     delayInMinutes: 1,
   });
+}
+
+/**
+ * 词表任一层变化后的缓存失效清理（invalidateStaleCache）：只删受词条变化影响的条目，
+ * 用户下次访问自然重翻。后台自动路径失败静默（记忆约定：后台失败不打扰），
+ * 靠下一轮词表更新重试兜底。
+ */
+async function sweepStaleCache(remoteUpdated: boolean, officialUpdated: boolean): Promise<void> {
+  if (!remoteUpdated && !officialUpdated) return;
+  try {
+    await invalidateStaleCache();
+  } catch (e) {
+    console.warn('stale cache sweep failed:', e);
+  }
 }
 
 api.runtime.onInstalled.addListener(() => {
@@ -27,6 +41,7 @@ api.alarms.onAlarm.addListener(alarm => {
   if (alarm.name !== 'glossaryCheck') return;
   updateGlossary(false).then(r => {
     if (r.updated) console.log('glossary auto-updated, count=', r.count);
+    return sweepStaleCache(false, r.updated);
   });
   // 语言层 + 人工层：GitHub 托管仓库按 sha 增量拉取。
   // 自动失败不主动打扰（设置页"上次拉取"时间侧面体现），手动检查失败才在设置页提示。
@@ -34,6 +49,7 @@ api.alarms.onAlarm.addListener(alarm => {
     .then(r => {
       if (r.updated) console.log('remote layers auto-updated:', r.changed.join('/'));
       else if (r.error) console.warn('remote layers update failed:', r.error);
+      return sweepStaleCache(r.updated, false);
     })
     .catch(e => console.warn('remote layers update crashed:', e));
 });
@@ -83,6 +99,8 @@ api.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
       }
       case 'glossaryUpdate': {
         const [r, remote] = await Promise.all([updateGlossary(msg.force ?? true), updateRemoteLayers(msg.force ?? true)]);
+        // 手动检查路径：更新落地后同步清理失效缓存，再回报状态
+        await sweepStaleCache(remote.updated, r.updated);
         const res: UpdateResult & { remote?: { updated: boolean; changed: string[]; error?: string } } = { ...r, remote };
         sendResponse(res);
         break;

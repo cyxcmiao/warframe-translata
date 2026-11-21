@@ -14,8 +14,7 @@ import { sha256hex } from '../shared/util';
 import { buildIconPairs, reanchorIcons } from '../shared/icons';
 import { chatWithRetry, classifyAiError, AiErrKind, TRANSLATE_SYSTEM_PROMPT, AiConfig } from './ai';
 import { addUsage } from './usage';
-import { idbOpen, idbGet, idbPut, idbKeys, idbGetAll, idbClear } from '../shared/idb';
-import { glossaryMeta } from './glossary';
+import { idbOpen, idbGet, idbPut, idbDel, idbKeys, idbGetAll, idbClear } from '../shared/idb';
 
 const MAX_BLOCKS_PER_REQ = 16;
 const MAX_CHARS_PER_REQ = 1600;
@@ -30,6 +29,10 @@ const AI_CONCURRENCY = 6;
 interface CacheVal {
   translation: string;
   viaAI: boolean;
+  /** 源文本原文：词表更新后的失效检测需要重匹配（否则感知不到新增/被删词条） */
+  text?: string;
+  /** 落缓存时块内命中的词条 en→zh：与更新后词表的重匹配结果比对，有差异即失效 */
+  termsUsed?: Record<string, string>;
 }
 
 let tdb: IDBDatabase | null = null;
@@ -42,9 +45,9 @@ function getTdb(): Promise<IDBDatabase> {
 }
 
 async function cacheKey(text: string, settings: Settings): Promise<string> {
-  const gv = glossaryMeta().version;
-  // PROMPT_VERSION: 提示词/机制词表升级时 bump，旧缓存自然失效重翻
-  return ['tr', PROMPT_VERSION, gv, settings.aiModel, await sha256hex(text)].join('|');
+  // 不掺词表版本：官方层每次 DE 更新都会变号，掺进去等于每次游戏更新全量清缓存重翻。
+  // 词表变化改为按条目精准失效（invalidateStaleCache）；PROMPT_VERSION 保留作提示词级手动全量开关。
+  return ['tr', PROMPT_VERSION, settings.aiModel, await sha256hex(text)].join('|');
 }
 
 function getCache(key: string): Promise<CacheVal | undefined> {
@@ -52,6 +55,54 @@ function getCache(key: string): Promise<CacheVal | undefined> {
 }
 function putCache(key: string, val: CacheVal): Promise<void> {
   return getTdb().then(d => idbPut(d, 'tcache', val, key));
+}
+
+/** 块内命中的词条表 en→zh（首个命中为准，与 collectTerms 的去重一致） */
+function termsUsedOf(matches: TermMatch[]): Record<string, string> {
+  const m: Record<string, string> = {};
+  for (const t of matches) if (!(t.en in m)) m[t.en] = t.zh;
+  return m;
+}
+
+/**
+ * 单条缓存失效判定（纯函数便于单测）：用当前匹配器重匹配源文本，与落缓存时的
+ * 词条比对——词条增/删/译名变化任意一种即判失效（旧译文里的术语与新词表已不一致）。
+ * text/termsUsed 缺失视为旧格式条目，直接判失效（key 格式变更后本就不可达）。
+ */
+export function cacheEntryStale(
+  matcher: { match(text: string): TermMatch[] },
+  text: string | undefined,
+  termsUsed: Record<string, string> | undefined,
+): boolean {
+  if (!text || !termsUsed) return true;
+  const now = termsUsedOf(matcher.match(text));
+  const ens = Object.keys(now);
+  return ens.length !== Object.keys(termsUsed).length || ens.some(en => termsUsed[en] !== now[en]);
+}
+
+/**
+ * 词表更新后的缓存清理：逐条重匹配判定，失效条目删除，用户下次访问该页时自然重翻
+ * （词典终局块本地即时重算零成本，AI 块等下次翻译请求）。挂在词表层变化之后（index.ts）：
+ * 远程层 sha 变化或官方层重建均触发。竞态窗口（更新落地瞬间在途翻译用旧词表回写缓存）
+ * 由下一轮词表更新再清理兜底，不留永久错误。
+ */
+export async function invalidateStaleCache(): Promise<number> {
+  await ensureGlossary();
+  const d = await getTdb();
+  const [keys, vals] = await Promise.all([
+    idbKeys(d, 'tcache'),
+    idbGetAll<CacheVal>(d, 'tcache'),
+  ]);
+  const matcher = getMatcher();
+  const stale: IDBValidKey[] = [];
+  for (let i = 0; i < keys.length; i++) {
+    const v = vals[i];
+    if (!v) continue;
+    if (cacheEntryStale(matcher, v.text, v.termsUsed)) stale.push(keys[i]);
+  }
+  await Promise.all(stale.map(k => idbDel(d, 'tcache', k).catch(() => {})));
+  if (stale.length) console.log(`cache: 词表更新后清理失效条目 ${stale.length}/${keys.length}`);
+  return stale.length;
 }
 
 /** 批内术语表（命中去重，限制数量防 token 膨胀） */
@@ -248,7 +299,7 @@ export async function translateBlocks(blocks: BlockIn[], settings: Settings): Pr
     const dictTr = buildTranslation(b.text, matches);
     // 词典已给出终局译文的块不再送去 AI（占全页相当比例的链接文本、短单元格）
     if (dictIsFinal(dictTr, matches)) {
-      const v: CacheVal = { translation: dictTr, viaAI: false };
+      const v: CacheVal = { translation: dictTr, viaAI: false, text: b.text, termsUsed: termsUsedOf(matches) };
       putCache(key, v).catch(() => {});
       results[b.id] = { id: b.id, ok: true, translation: v.translation, viaAI: false };
       continue;
@@ -292,7 +343,12 @@ export async function translateBlocks(blocks: BlockIn[], settings: Settings): Pr
           tr = enforceTerms(tr, terms);
           // 图标占位符跟丢锚点（AI 语序调整）→ 吸附回数字/官方译名之前
           tr = reanchorIcons(it.job.text, tr, buildIconPairs(it.job.text, it.job.iconIds, it.job.matches));
-          done.set(it.job.key, { translation: tr, viaAI: true });
+          done.set(it.job.key, {
+            translation: tr,
+            viaAI: true,
+            text: it.job.text,
+            termsUsed: termsUsedOf(it.job.matches),
+          });
         });
       } catch (e) {
         console.warn('AI chunk failed:', e);
@@ -343,10 +399,10 @@ export async function cacheStats(): Promise<{ count: number; bytes: number }> {
     idbKeys(d, 'tcache'),
     idbGetAll<CacheVal>(d, 'tcache'),
   ]);
-  // IDB 字符串按 UTF-16 存：key + 译文长度 ×2 字节 + 每条固定开销
+  // IDB 字符串按 UTF-16 存：key + 译文 + 源文本（失效检测用）长度 ×2 字节 + 每条固定开销
   const bytes = vals.reduce((acc, v, i) => {
     const k = keys[i] as string ?? '';
-    return acc + ((k.length + (v?.translation?.length ?? 0) + 8) * 2);
+    return acc + ((k.length + (v?.translation?.length ?? 0) + (v?.text?.length ?? 0) + 8) * 2);
   }, 0);
   return { count: keys.length, bytes };
 }
