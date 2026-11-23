@@ -457,7 +457,7 @@ export async function aiTest(settings: Settings): Promise<{ ok: boolean; message
       '你是翻译测试接口，只输出收到的文本原文。',
       'ping（收到请只回复 pong）',
       0,
-      32,
+      512, // 32 会被默认思考模式的思考 token 吃空（thinking 参数被端点忽略时兜底）
     );
     return { ok: true, message: `连接成功，模型回复: ${r.content.trim().slice(0, 50)}` };
   } catch (e) {

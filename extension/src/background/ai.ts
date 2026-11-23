@@ -27,6 +27,13 @@ export function estimateMaxTokens(user: string): number {
   return Math.ceil(user.length * 2) + 512;
 }
 
+/**
+ * 关闭思考模式（DeepSeek V4 系默认思考，文档参数 thinking.type=disabled）：
+ * 思考 token 计入 max_tokens，小预算请求会被思考挤成空响应；
+ * 且思考模式忽略 temperature，破坏确定性翻译。翻译是词表驱动的确定性任务，无需思考。
+ */
+const NO_THINKING = { type: 'disabled' } as const;
+
 /** 单次 chat completion（超时 60s，不重试——重试在编排层做） */
 export async function chatOnce(
   cfg: AiConfig,
@@ -39,35 +46,48 @@ export async function chatOnce(
   const timer = setTimeout(() => ctrl.abort(), 60000);
   try {
     const url = cfg.baseUrl.replace(/\/+$/, '') + '/chat/completions';
-    const res = await fetch(url, {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${cfg.key}`,
-      },
-      body: JSON.stringify({
+    const body = (noThinking: boolean): string =>
+      JSON.stringify({
         model: cfg.model,
         temperature,
         stream: false,
         max_tokens: maxTokens ?? estimateMaxTokens(user),
+        ...(noThinking ? { thinking: NO_THINKING } : {}),
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
-      }),
-    });
+      });
+    const send = (noThinking: boolean): Promise<Response> =>
+      fetch(url, {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${cfg.key}`,
+        },
+        body: body(noThinking),
+      });
+    let res = await send(true);
+    if (res.status === 400) {
+      const text = await res.text().catch(() => '');
+      if (!/thinking/i.test(text)) throw new AiError(`HTTP 400 ${text.slice(0, 300)}`, 400);
+      res = await send(false); // 端点不认识 thinking 参数（非 DeepSeek 兼容端）→ 去掉重发
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       throw new AiError(`HTTP ${res.status} ${text.slice(0, 300)}`, res.status);
     }
     const data = (await res.json()) as {
-      choices?: Array<{ message?: { content?: string }; finish_reason?: string }>;
+      choices?: Array<{ message?: { content?: string; reasoning_content?: string }; finish_reason?: string }>;
       usage?: { prompt_tokens?: number; completion_tokens?: number };
     };
     const choice = data.choices?.[0];
     const content = choice?.message?.content;
-    if (!content) throw new AiError('empty response');
+    if (!content) {
+      const hint = choice?.message?.reasoning_content ? '（思考耗尽了 max_tokens，正文为空）' : '';
+      throw new AiError(`empty response${hint}`);
+    }
     return {
       content,
       truncated: choice?.finish_reason === 'length',

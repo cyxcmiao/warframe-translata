@@ -41,6 +41,9 @@ const BLOCK_SEL = [
   'th', 'td', '.pi-data-value',
   // 商店模板（offeringsBox）的物品名/描述是普通 div 文本，其余采集器覆盖不到
   '.offeringsBoxName', '.offeringsBoxDes',
+  // 消息盒模板（mbox）：引言/正文/旁注全是纯 div（.mbox__content__header 等），
+  // 不进候选就整盒英文（Buff & Debuff 顶部的维护中/非官方/剧透盒曾漏翻）
+  '.mbox__content__header', '.mbox__content__text', '.mbox__content__aside',
   // Tabber 面板（TabberNeue）：正文常为裸内联文本（不包 p），不进候选就永远
   // 没人采集（Nightwatch Corps 页 Brunt Lancer 等面板整段英文）；包 p 的部分
   // 由 BLOCKISH 中断拆给 p 自己，面板只序列化裸文本，不重复采集
