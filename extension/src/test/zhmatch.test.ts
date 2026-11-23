@@ -1,5 +1,6 @@
 /** ZhMatcher（zh→en 反向匹配器）单元测试: node tools/test_zh_search.js */
 import { ZhMatcher, hasCJK } from '../shared/zhmatch';
+import { mergeGlossaryLayers } from '../shared/layers';
 import type { TermEntry } from '../shared/types';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -156,7 +157,29 @@ const m = new ZhMatcher(entries);
   check('resolve 单字符中文放行', r.query === '电' && r.hits.length === 0, r);
 }
 
-// --- 真实合并数据冒烟（与运行时 mergeGlossaryLayers 一致的合并序）
+// --- prio：用户自定义词条同 zh 碰撞时排最前（suggest 展示序 + resolve 改写优先）
+{
+  const m2 = new ZhMatcher([
+    { en: 'Shock', zh: '电击' },
+    { en: 'Electricity', zh: '电击', prio: true }, // 用户自定义覆盖同名官方译名
+  ]);
+  const items = m2.suggest('电击');
+  check('prio 词条 suggest 排最前', items[0]?.en === 'Electricity', items);
+  check('prio 词条仍保留其余候选', items.length === 2 && items.some(x => x.en === 'Shock'), items);
+  const r = m2.resolve('电击 mod');
+  check('prio 词条 resolve 优先改写', r.query === 'Electricity mod' && r.hits[0]?.en === 'Electricity', r);
+}
+{
+  // 无碰撞时 prio 不改变行为（码点序兜底）
+  const m3 = new ZhMatcher([
+    { en: 'Zephyr', zh: 'Zephyr' },
+    { en: 'Battery', zh: '电池', prio: true },
+    { en: 'Cell', zh: '电池' },
+  ]);
+  check('prio 无碰撞时正常索引', m3.resolve('电池')?.query === 'Battery', m3.resolve('电池'));
+}
+
+// --- 真实合并数据冒烟（走运行时同一套 mergeGlossaryLayers）
 {
   const root = path.join(__dirname, '../..');
   const data = JSON.parse(fs.readFileSync(path.join(root, 'data/de_names.json'), 'utf8')) as {
@@ -166,13 +189,10 @@ const m = new ZhMatcher(entries);
   const mech = JSON.parse(fs.readFileSync(path.join(root, 'data/mechanism_terms.json'), 'utf8')) as Record<string, string>;
   const lang = JSON.parse(fs.readFileSync(path.join(root, 'data/lang_terms.json'), 'utf8')) as { terms: Record<string, string> };
   const overrides = JSON.parse(fs.readFileSync(path.join(root, 'data/manual_overrides.json'), 'utf8')) as Record<string, string>;
-  const retained = new Set(((data.retained ?? []) as string[]).map(s => s.toLowerCase()));
-  const merged: Record<string, string> = {};
-  for (const [en, zh] of Object.entries(mech)) if (!retained.has(en.toLowerCase())) merged[en] = zh;
-  for (const [en, zh] of Object.entries(lang.terms)) if (!retained.has(en.toLowerCase())) merged[en] = zh;
-  for (const [en, zh] of Object.entries(data.terms)) merged[en] = zh;
-  for (const [en, zh] of Object.entries(overrides)) merged[en] = zh;
-  for (const en of Object.keys(merged)) if (!merged[en]) delete merged[en];
+  const merged = mergeGlossaryLayers(
+    { mech, lang: lang.terms, official: data.terms, overrides, user: {} },
+    data.retained ?? [],
+  );
   const real = new ZhMatcher(Object.entries(merged).map(([en, zh]) => ({ en, zh })));
   const r = real.resolve('电击');
   check('真实数据 电击 命中', r.hits.length === 1 && /^[A-Za-z]/.test(r.query), r);
@@ -183,6 +203,17 @@ const m = new ZhMatcher(entries);
   check('真实数据 布拉玛 包含命中 赤毒·布拉玛', kuva.some(x => x.zh === '赤毒·布拉玛'), kuva);
   const rk = real.resolve('布拉玛');
   check('真实数据 布拉玛 改写 Kuva Bramma', rk.query === 'Kuva Bramma' && rk.hits[0]?.zh === '赤毒·布拉玛', rk);
+
+  // 自定义词条注入真实词表：覆盖官方译名 + 空译名不生效 + prio 改写优先
+  const mergedUser = mergeGlossaryLayers(
+    { mech, lang: lang.terms, official: data.terms, overrides, user: { Electricity: '雷电', Shock: '' } },
+    data.retained ?? [],
+  );
+  const mu = new ZhMatcher(
+    Object.entries(mergedUser).map(([en, zh]) => ({ en, zh, prio: en === 'Electricity' })),
+  );
+  check('自定义词条改写优先', mu.resolve('雷电')?.query === 'Electricity', mu.resolve('雷电'));
+  check('空译名不删除官方词条', mu.suggest('电击').some(x => x.en === 'Shock'), mu.suggest('电击'));
 }
 
 console.log(failed === 0 ? '\nALL PASS' : `\n${failed} FAILED`);

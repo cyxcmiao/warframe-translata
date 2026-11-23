@@ -128,13 +128,20 @@ export async function invalidateStaleCache(): Promise<number> {
   return stale.length;
 }
 
-/** 批内术语表（命中去重，限制数量防 token 膨胀） */
+/**
+ * 批内术语表（命中去重，限制数量防 token 膨胀）。
+ * 用户自定义词条（prio）排最前：术语数超 MAX_TERMS_PER_REQ 被截断时，
+ * 最高优先级的自定义译名永不丢失；同组内保持文本出现顺序（sort 稳定）。
+ */
 function collectTerms(allMatches: Map<string, TermMatch[]>): TermEntry[] {
-  const seen = new Map<string, string>();
+  const seen = new Map<string, { zh: string; prio: boolean }>();
   for (const ms of allMatches.values()) {
-    for (const m of ms) if (!seen.has(m.en)) seen.set(m.en, m.zh);
+    for (const m of ms) if (!seen.has(m.en)) seen.set(m.en, { zh: m.zh, prio: !!m.prio });
   }
-  return [...seen.entries()].slice(0, MAX_TERMS_PER_REQ).map(([en, zh]) => ({ en, zh }));
+  return [...seen.entries()]
+    .sort((a, b) => Number(b[1].prio) - Number(a[1].prio))
+    .slice(0, MAX_TERMS_PER_REQ)
+    .map(([en, v]) => ({ en, zh: v.zh, prio: v.prio }));
 }
 
 /** ASCII 单词（含连字符/撇号，如 "Kuva-Lich"、"Xiphos"） */

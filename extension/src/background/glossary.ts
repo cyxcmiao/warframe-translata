@@ -9,6 +9,7 @@
 import { idbOpen, idbGet, idbPut } from '../shared/idb';
 import { TermMatcher } from '../shared/matcher';
 import { ZhMatcher } from '../shared/zhmatch';
+import { effectiveUserTerms, mergeGlossaryLayers, userRetained } from '../shared/layers';
 import { GITEE_REPO, LANG_TERMS_REPO } from '../shared/const';
 import type { GlossaryMeta, TermEntry } from '../shared/types';
 import { todayStr, sha256hex, b64ToUtf8 } from '../shared/util';
@@ -37,14 +38,16 @@ let retainedMatcher: TermMatcher | null = null;
 let zhMatcher: ZhMatcher | null = null;
 let entryList: TermEntry[] = [];
 /**
- * 三个补充/人工层的运行时状态。加载与更新统一走 LAYERS 表：
+ * 三个远程补充/人工层的运行时状态。加载与更新统一走 LAYERS 表：
  * 每层 = IDB 远程记录优先（'glossary' store，key=层 id），无记录用扩展内置快照；
  * layerSha 是当前生效内容的 sha256，作为后续增量比对基准。
+ * userTerms 不走 LAYERS（无远程源）：options 页写入 IDB key='userTerms'，纯本机层。
  */
-const layerTerms: Record<'mechTerms' | 'langTerms' | 'manualOverrides', Record<string, string>> = {
+const layerTerms: Record<'mechTerms' | 'langTerms' | 'manualOverrides' | 'userTerms', Record<string, string>> = {
   mechTerms: {},
   langTerms: {},
   manualOverrides: {},
+  userTerms: {},
 };
 const layerSha: Record<string, string> = { mechTerms: '', langTerms: '', manualOverrides: '' };
 let remoteLastCheck: string | null = null;
@@ -55,6 +58,7 @@ let updating: Promise<UpdateResult> | null = null;
 const mechTerms = () => layerTerms.mechTerms;
 const langTerms = () => layerTerms.langTerms;
 const manualOverrides = () => layerTerms.manualOverrides;
+const userTerms = () => layerTerms.userTerms;
 
 /** 远程词条记录（IDB store 'glossary'，key=层 id），存在则优先于内置快照 */
 interface LayerRecord {
@@ -62,6 +66,12 @@ interface LayerRecord {
   sha: string;
   version?: string;
   fetchedAt: string;
+}
+
+/** 用户自定义词表记录（IDB store 'glossary'，key='userTerms'；纯本机数据，不参与远程同步） */
+interface UserTermsRecord {
+  terms: Record<string, string>;
+  updatedAt: string;
 }
 
 export interface RemoteLayersResult {
@@ -266,39 +276,74 @@ export async function updateRemoteLayers(force = false): Promise<RemoteLayersRes
 }
 
 /**
- * 合并术语层（优先级从低到高：机制表 < 语言文件层 < 官方词表 < 人工覆盖层）：
- *  - 官方已有译名的条目以官方为准（后展开覆盖）；
- *  - 官方保留英文名（retained，如 Excalibur）即使各补充层里有也删掉，照抄英文才是正确译法；
- *  - 人工覆盖层最后展开：明确的人工意图可覆盖包括官方与 retained 锁定在内的一切
- *    （修正官方过时/错误译名，或 zh===en 强制保留英文）；
- *  - 人工覆盖层 zh 为空串 = 删除词条：人工裁决不收录的争议词不强制译名，交 AI 语境兜底。
- *    空值在任何层都无意义，合并后统一剔除。
+ * 用户自定义词表（本机层，最高优先级）：
+ *  - 存储：IDB 'glossary' store key='userTerms'，纯本机数据，不上传不同步；
+ *  - options 页编辑（一行一条「英文, 中文」），保存即热重建匹配器；
+ *  - 空译名不生效（自定义层不支持删除词条，编辑端按无效行忽略）。
  */
-function mergeGlossaryLayers(official: Record<string, string>, retained: string[]): Record<string, string> {
-  const out = { ...mechTerms(), ...langTerms() };
-  const retainedSet = new Set(retained.map(s => s.toLowerCase()));
-  for (const en of Object.keys(out)) {
-    if (retainedSet.has(en.toLowerCase())) delete out[en];
-  }
-  const merged = { ...out, ...official, ...manualOverrides() };
-  for (const en of Object.keys(merged)) {
-    if (!merged[en]) delete merged[en];
-  }
-  return merged;
+
+/** 读取本机自定义词表（随 ensureGlossary 装载，返回运行时生效状态） */
+export async function getUserTerms(): Promise<{
+  terms: Record<string, string>;
+  updatedAt: string | null;
+  count: number;
+}> {
+  await ensureGlossary();
+  const d = await getDb();
+  const rec = await idbGet<UserTermsRecord>(d, 'glossary', 'userTerms');
+  return {
+    terms: userTerms(),
+    updatedAt: rec?.updatedAt ?? null,
+    count: Object.keys(userTerms()).length,
+  };
+}
+
+/** 保存本机自定义词表：落 IDB + 热重建匹配器（调用方负责触发缓存失效清理） */
+export async function setUserTerms(terms: Record<string, string>): Promise<{ count: number }> {
+  if (!isTermsObject(terms)) throw new Error('自定义词表格式异常');
+  const clean = effectiveUserTerms(terms); // 防御：空译名不入库（自定义层无删除语义）
+  const d = await getDb();
+  const rec: UserTermsRecord = { terms: clean, updatedAt: new Date().toISOString() };
+  await idbPut(d, 'glossary', rec, 'userTerms');
+  layerTerms.userTerms = clean;
+  await ensureGlossary(); // record 未就绪时先完成装载（其 installRecord 已含新 user 层）
+  if (record) installRecord(record); // record 已就绪则热重建
+  return { count: Object.keys(clean).length };
 }
 
 function installRecord(rec: GlossaryRecord): void {
   record = rec;
-  const merged = mergeGlossaryLayers(rec.terms, rec.retained ?? []);
-  entryList = Object.entries(merged).map(([en, zh]) => ({ en, zh }));
+  const merged = mergeGlossaryLayers(
+    {
+      mech: mechTerms(),
+      lang: langTerms(),
+      official: rec.terms,
+      overrides: manualOverrides(),
+      user: userTerms(),
+    },
+    rec.retained ?? [],
+  );
+  const userMap = effectiveUserTerms(userTerms());
+  const userLower = new Set(Object.keys(userMap).map(k => k.toLowerCase()));
+  entryList = Object.entries(merged).map(([en, zh]) => ({ en, zh, prio: userLower.has(en.toLowerCase()) }));
   matcher = new TermMatcher(entryList);
-  retainedMatcher = new TermMatcher((rec.retained ?? []).map(en => ({ en, zh: en })));
+  // retained 匹配器 = 官方保留英文名 + 用户强制保留英文（zh===en），后者需热随自定义层重建
+  const retainedAll = [...(rec.retained ?? []), ...userRetained(userMap)];
+  retainedMatcher = new TermMatcher(retainedAll.map(en => ({ en, zh: en })));
   zhMatcher = new ZhMatcher(entryList);
 }
 
 export async function ensureGlossary(): Promise<void> {
   if (!layersLoaded) {
     for (const spec of LAYERS) await loadLayerState(spec);
+    // 本机自定义层：IDB 记录（options 页写入），无内置快照
+    try {
+      const d = await getDb();
+      const rec = await idbGet<UserTermsRecord>(d, 'glossary', 'userTerms');
+      if (rec && isTermsObject(rec.terms)) layerTerms.userTerms = rec.terms;
+    } catch {
+      /* IDB 不可用则自定义层为空 */
+    }
     layersLoaded = true;
   }
   if (record) return;
@@ -353,7 +398,16 @@ export function zhResolve(q: string): ReturnType<ZhMatcher['resolve']> {
 
 export function glossaryMeta(): GlossaryMeta {
   if (!record) {
-    return { version: '', count: 0, retainedCount: 0, builtAt: '', lastCheck: null, langCount: 0, langLastCheck: null };
+    return {
+      version: '',
+      count: 0,
+      retainedCount: 0,
+      builtAt: '',
+      lastCheck: null,
+      langCount: 0,
+      langLastCheck: null,
+      userCount: 0,
+    };
   }
   return {
     version: record.version,
@@ -363,6 +417,7 @@ export function glossaryMeta(): GlossaryMeta {
     lastCheck: record.lastCheck,
     langCount: Object.keys(layerTerms.langTerms).length,
     langLastCheck: remoteLastCheck,
+    userCount: Object.keys(layerTerms.userTerms).length,
   };
 }
 

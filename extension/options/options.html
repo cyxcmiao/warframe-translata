@@ -42,7 +42,7 @@
     </label>
     <label class="row">
       <input type="checkbox" id="zhSearch">
-      搜索框支持中文术语（输入官方中文译名出候选，提交时自动改写为英文搜索）
+      搜索框支持中文术语（输入官方中文译名或自定义词条出候选，提交时自动改写为英文搜索）
     </label>
     <label class="row">译文字号 <input type="number" id="fontSize" min="11" max="20" step="1"></label>
     <label class="row">译文颜色 <input type="color" id="color"></label>
@@ -78,6 +78,15 @@
       <button id="glossUpdate" class="secondary">立即检查更新</button>
       <span id="glossResult" class="result"></span>
     </div>
+  </section>
+
+  <section>
+    <h2>自定义词表</h2>
+    <p class="hint">修正或补充术语译名：一行一条，格式「英文, 中文」（如 buff, 增益）。以最后一个英文逗号分隔，因此英文名本身含逗号时照常写（如 Bounty, Tier 5, 赏金任务5阶）；中文译文里要写英文逗号请转义为 \,，中文逗号，可随意使用。优先级最高，覆盖官方词表与所有词表层；「#」开头的行是注释。保存后立即生效，搜索框中文检索同样支持自定义词条。</p>
+    <textarea id="userTerms" rows="8" spellcheck="false" placeholder="buff, 增益&#10;Kuva Bramma, 赤毒·布拉玛&#10;# 英文名含逗号照常写：Bounty, Tier 5, 赏金任务5阶"></textarea>
+    <p id="userTermsStatus" class="hint">加载中…</p>
+    <p id="userTermsResult" class="result"></p>
+    <p class="hint">自定义词条仅保存在本机（IndexedDB），不上传、不同步、不随扩展更新改变。</p>
   </section>
 
   <footer>translataWiki v<span id="ver"></span> · 术语 100% 采用官方译名，表外专有名词保留英文</footer>

@@ -26,6 +26,8 @@ export interface GlossaryMeta {
   /** 游戏语言文件挖掘层的条目数与上次拉取时间（运行时自动更新） */
   langCount: number;
   langLastCheck: string | null;
+  /** 用户自定义词条数（本机 IndexedDB，最高优先级） */
+  userCount: number;
 }
 
 /** 词表匹配结果（位置基于传入文本） */
@@ -36,11 +38,15 @@ export interface TermMatch {
   zh: string;
   /** 命中了所有格后缀 's（译文应为 zh + 的） */
   pos: boolean;
+  /** 命中用户自定义词条（最高优先级）：批内术语截断时优先保留 */
+  prio?: boolean;
 }
 
 export interface TermEntry {
   en: string;
   zh: string;
+  /** 用户自定义词条（最高优先级）：同 zh 多候选时排最前，搜索改写/点选直达优先命中 */
+  prio?: boolean;
 }
 
 /** 搜索框中文候选（词表反向查询，zh→en） */
@@ -85,7 +91,10 @@ export type Msg =
   | { type: 'cacheStats' }
   | { type: 'cacheClear' }
   | { type: 'zhSuggest'; q: string; limit?: number }
-  | { type: 'zhResolve'; q: string };
+  | { type: 'zhResolve'; q: string }
+  /** 用户自定义词表（本机层，options 页读写） */
+  | { type: 'userTermsGet' }
+  | { type: 'userTermsSet'; terms: Record<string, string> };
 
 export interface BootstrapResp {
   settings: Settings;

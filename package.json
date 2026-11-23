@@ -10,7 +10,7 @@
     "icons": "node tools/gen_icons.js",
     "build:data": "node tools/build_de_map.js && node tools/build_lang_terms.js",
     "typecheck": "tsc -p extension/src/test/tsconfig.json",
-    "test": "node tools/test_matcher.js && node tools/test_sweep.js && node tools/test_zh_search.js"
+    "test": "node tools/test_matcher.js && node tools/test_sweep.js && node tools/test_zh_search.js && node tools/test_layers.js && node tools/test_userterms.js"
   },
   "dependencies": {
     "lzma": "^2.3.2",

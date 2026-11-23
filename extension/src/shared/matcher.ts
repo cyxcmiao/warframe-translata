@@ -9,7 +9,7 @@ import type { TermEntry, TermMatch } from './types';
 
 interface TrieNode {
   ch: Map<string, TrieNode>;
-  term?: { en: string; zh: string };
+  term?: { en: string; zh: string; prio?: boolean };
 }
 
 const isWord = (c: string) => /[a-z0-9]/i.test(c);
@@ -19,7 +19,7 @@ export class TermMatcher {
   private root: TrieNode = { ch: new Map() };
 
   constructor(entries: TermEntry[]) {
-    for (const { en, zh } of entries) {
+    for (const { en, zh, prio } of entries) {
       const key = normalize(en).replace(/\s+/g, ' ').trim();
       if (key.length < 2) continue;
       let node = this.root;
@@ -31,8 +31,8 @@ export class TermMatcher {
         }
         node = next;
       }
-      // 同名词条先到先得（构建端已做冲突处理）
-      if (!node.term) node.term = { en, zh };
+      // 同名词条先到先得（构建端已做冲突处理）；用户自定义词条（prio）优先占位
+      if (!node.term || (prio && !node.term.prio)) node.term = { en, zh, prio };
     }
   }
 
@@ -57,7 +57,7 @@ export class TermMatcher {
     if (i > 0 && isWord(lower[i - 1])) return null;
 
     let node: TrieNode = this.root;
-    let best: { term: { en: string; zh: string }; end: number } | null = null;
+    let best: { term: { en: string; zh: string; prio?: boolean }; end: number } | null = null;
     let idx = i;
     while (idx < lower.length) {
       const c = lower[idx];
@@ -95,7 +95,7 @@ export class TermMatcher {
     const after = lower[end];
     if (after !== undefined && isWord(after)) return null; // 例: "primespecial" 不算命中
 
-    return { s: i, e: end, en: best.term.en, zh: best.term.zh, pos };
+    return { s: i, e: end, en: best.term.en, zh: best.term.zh, pos, prio: best.term.prio };
   }
 }
 

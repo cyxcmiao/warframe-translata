@@ -1,5 +1,15 @@
 /** background 入口 — 消息路由 / 词表定时更新 */
-import { ensureGlossary, glossaryMeta, updateGlossary, updateRemoteLayers, zhResolve, zhSuggest, UpdateResult } from './glossary';
+import {
+  ensureGlossary,
+  glossaryMeta,
+  getUserTerms,
+  setUserTerms,
+  updateGlossary,
+  updateRemoteLayers,
+  zhResolve,
+  zhSuggest,
+  UpdateResult,
+} from './glossary';
 import { translateBlocks, aiTest, cacheStats, cacheClear, invalidateStaleCache } from './translate';
 import { getSettings } from './settings';
 import { api } from '../shared/api';
@@ -62,7 +72,14 @@ api.storage.onChanged.addListener((changes, area) => {
   scheduleGlossaryCheck();
 });
 
-type Msg = { type: string; blocks?: Array<{ id: string; text: string }>; force?: boolean; q?: string; limit?: number };
+type Msg = {
+  type: string;
+  blocks?: Array<{ id: string; text: string }>;
+  force?: boolean;
+  q?: string;
+  limit?: number;
+  terms?: Record<string, string>;
+};
 
 api.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
   (async () => {
@@ -116,6 +133,23 @@ api.runtime.onMessage.addListener((msg: Msg, _sender, sendResponse) => {
       case 'zhResolve': {
         await ensureGlossary();
         sendResponse(zhResolve(msg.q ?? ''));
+        break;
+      }
+      // 用户自定义词表（本机层，options 页读写）。保存后精准失效受影响缓存：
+      // 译名改/词条增删的缓存条目被清理，用户下次访问自然重翻（词典块本地即时重算零成本）
+      case 'userTermsGet': {
+        sendResponse(await getUserTerms());
+        break;
+      }
+      case 'userTermsSet': {
+        const r = await setUserTerms(msg.terms ?? {});
+        let swept = -1;
+        try {
+          swept = await invalidateStaleCache();
+        } catch (e) {
+          console.warn('user terms cache sweep failed:', e); // 失效清理失败由下轮词表检查兜底
+        }
+        sendResponse({ ...r, swept });
         break;
       }
       default:

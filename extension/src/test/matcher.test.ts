@@ -118,6 +118,21 @@ const m = new TermMatcher(entries);
   const ms = m.match('Flechette rivens are popular.');
   check('单独 Flechette → 箭型弹头', ms.some(x => x.en === 'Flechette' && x.zh === '箭型弹头'), ms);
 }
+// --- 用户自定义词条（prio）：同名词条压过官方、match 结果标记 prio、译文采用自定义译名
+{
+  const um = new TermMatcher([
+    { en: 'Tigris Prime', zh: '猛虎 Prime' }, // 官方先入
+    { en: 'Tigris Prime', zh: '自定义猛虎', prio: true }, // 自定义后入但 prio 优先占位
+  ]);
+  const ms = um.match('The Tigris Prime is a shotgun.');
+  const hit = ms.find(x => x.en === 'Tigris Prime');
+  check('prio 同名词条压过官方', !!hit && hit.zh === '自定义猛虎' && hit.prio === true, ms);
+  const tr = buildTranslation('The Tigris Prime is a shotgun.', ms);
+  check('prio 词条进入词典直译', tr.includes('自定义猛虎'), tr);
+  const ms2 = m.match('The Tigris Prime is a shotgun.'); // 无自定义层时官方优先
+  check('无自定义层时官方译名不变', ms2.find(x => x.en === 'Tigris Prime')?.zh === '猛虎 Prime', ms2);
+}
+
 // --- base64 解码（Gitee contents API 拉取路径）
 {
   const b64 = Buffer.from('{"terms":{"Tigris Prime":"猛虎 Prime"}}', 'utf8').toString('base64');

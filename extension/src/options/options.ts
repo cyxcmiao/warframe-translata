@@ -2,6 +2,7 @@
 import { api } from '../shared/api';
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from '../shared/const';
 import { formatShortcut } from '../shared/hotkey';
+import { parseUserTermsText, serializeUserTerms } from '../shared/userterms';
 import { getUsage } from '../background/usage';
 import type { Settings, GlossaryMeta } from '../shared/types';
 
@@ -230,9 +231,61 @@ $('glossUpdate').addEventListener('click', async () => {
   void refreshGlossStatus();
 });
 
+// ---- 自定义词表（本机层，最高优先级） ----
+// 一行一条「英文, 中文」；分隔符是最后一个未转义英文逗号（英文名可自带逗号，
+// 译文里的英文逗号转义为 `\,`）；「#」注释。解析/序列化见 shared/userterms.ts。
+// 输入防抖自动保存（设置自动保存约定），后台落 IDB + 热重建匹配器 + 精准失效受影响缓存。
+
+const utText = $('userTerms') as HTMLTextAreaElement;
+let utTimer: ReturnType<typeof setTimeout> | null = null;
+let utSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function saveUserTerms(): Promise<void> {
+  const { terms, bad } = parseUserTermsText(utText.value);
+  try {
+    const res = (await api.runtime.sendMessage({ type: 'userTermsSet', terms })) as { count: number };
+    $('userTermsStatus').textContent = `已保存 ${res.count} 条自定义词条 · 仅保存在本机，不上传不同步`;
+    void refreshGlossStatus(); // 生效词表总数已变（自定义层最高优先级）
+    const r = $('userTermsResult');
+    if (bad.length) {
+      r.textContent = `已忽略 ${bad.length} 行（需「英文, 中文」格式）：${bad.slice(0, 3).join('、')}${bad.length > 3 ? '…' : ''}`;
+      r.style.color = '#c0392b';
+    } else {
+      r.textContent = '已保存 ✓';
+      r.style.color = '#2a9d5c';
+      if (utSaveTimer) clearTimeout(utSaveTimer);
+      utSaveTimer = setTimeout(() => (r.textContent = ''), 1500);
+    }
+  } catch (e) {
+    $('userTermsResult').textContent = `保存失败: ${e}`;
+    $('userTermsResult').style.color = '#c0392b';
+  }
+}
+
+utText.addEventListener('input', () => {
+  if (utTimer) clearTimeout(utTimer);
+  utTimer = setTimeout(() => void saveUserTerms(), 700);
+});
+utText.addEventListener('change', () => {
+  if (utTimer) clearTimeout(utTimer);
+  void saveUserTerms(); // 失焦立即保存（粘贴后直接关页的兜底）
+});
+
+async function loadUserTerms(): Promise<void> {
+  const ut = (await api.runtime.sendMessage({ type: 'userTermsGet' })) as {
+    terms: Record<string, string>;
+    count: number;
+  };
+  utText.value = serializeUserTerms(ut.terms ?? {});
+  $('userTermsStatus').textContent = ut.count
+    ? `当前 ${ut.count} 条自定义词条 · 仅保存在本机（IndexedDB），不上传不同步`
+    : '暂无自定义词条 · 格式：一行一条「英文, 中文」';
+}
+
 $('ver').textContent = api.runtime.getManifest().version;
 void load().then(() => {
   void refreshGlossStatus();
   void refreshUsage();
   void refreshCache();
+  void loadUserTerms();
 });

@@ -4,3 +4,5 @@ tools/.tmp/
 tools/cache/
 *.log
 .DS_Store
+# 术语仲裁/拆词审核工作清单（本地生成，含待人工确认的译名，不上传）
+glossary_*.csv

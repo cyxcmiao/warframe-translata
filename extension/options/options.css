@@ -17,13 +17,27 @@ section {
 }
 .row { display: flex; align-items: center; gap: 8px; margin: 10px 0; flex-wrap: wrap; }
 label.row { display: flex; }
-input[type="text"], input[type="password"], input[type="number"] {
-  flex: 1 1 220px;
+input[type="text"], input[type="password"], input[type="number"], textarea {
   padding: 6px 10px;
   border: 1px solid #cfd6e0;
   border-radius: 6px;
   font: inherit;
 }
+input[type="text"], input[type="password"], input[type="number"] {
+  flex: 1 1 220px;
+}
+/* 自定义词表编辑区 */
+textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 140px;
+  resize: vertical;
+  font-family: Consolas, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  background: #fbfcfe;
+}
+textarea:focus { outline: none; border-color: #4a90d9; }
 input[type="color"] { width: 44px; height: 28px; border: none; background: none; }
 input[type="number"] { flex: 0 1 80px; }
 /* 快捷键录制框 */

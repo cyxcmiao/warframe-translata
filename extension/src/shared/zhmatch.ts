@@ -21,7 +21,7 @@ export function hasCJK(s: string): boolean {
 }
 
 export class ZhMatcher {
-  /** zh → en 候选（字典序，确定性） */
+  /** zh → en 候选（prio 词条排最前，其余字典序，确定性） */
   private exact = new Map<string, string[]>();
   /** 含 CJK 的 zh key 升序数组（前缀二分用） */
   private keys: string[] = [];
@@ -29,7 +29,8 @@ export class ZhMatcher {
 
   constructor(entries: TermEntry[]) {
     const raw = new Map<string, Set<string>>();
-    for (const { en, zh } of entries) {
+    const prioEns = new Map<string, Set<string>>();
+    for (const { en, zh, prio } of entries) {
       const key = zh.replace(/\s+/g, ' ').trim();
       // 只索引含中文的词条：zh===en（retained/强制保留英文）与纯英文名没有中文可输入
       if (key.length < 2 || !hasCJK(key) || key === en.trim()) continue;
@@ -39,9 +40,21 @@ export class ZhMatcher {
         raw.set(key, set);
       }
       set.add(en);
+      if (prio) {
+        let ps = prioEns.get(key);
+        if (!ps) {
+          ps = new Set();
+          prioEns.set(key, ps);
+        }
+        ps.add(en);
+      }
     }
     for (const [zh, set] of raw) {
-      this.exact.set(zh, [...set].sort(cmp));
+      // prio（用户自定义）候选排最前：resolve 取首个改写、suggest 完全命中按此序展示
+      const ps = prioEns.get(zh);
+      const head = ps ? [...ps].sort(cmp) : [];
+      const rest = ps ? [...set].filter(en => !ps.has(en)).sort(cmp) : [...set].sort(cmp);
+      this.exact.set(zh, [...head, ...rest]);
     }
     this.keys = [...raw.keys()].sort(cmp);
     for (const k of this.keys) this.maxKeyLen = Math.max(this.maxKeyLen, k.length);
