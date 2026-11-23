@@ -1,6 +1,6 @@
 {
   "name": "translatawiki",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "type": "commonjs",
   "description": "Warframe 英文 Wiki 精准翻译扩展：官方词表锁术语 + AI 句子翻译",
